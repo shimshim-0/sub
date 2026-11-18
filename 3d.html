@@ -1,0 +1,2496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>환승 러시 3D: 흐느적 출근길</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #080b11;
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+            font-feature-settings: "tnum";
+            touch-action: none;
+        }
+        .font-display {
+            font-family: 'Space Grotesk', 'Pretendard', sans-serif;
+        }
+        #webgl-container {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 서울 지하철 안내판 스타일 글래스 패널 */
+        .metro-glass {
+            background: rgba(12, 16, 24, 0.72);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        .metro-glass-light {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* 타이틀 배경 비네트 */
+        .live-vignette {
+            background: radial-gradient(circle at 72% 48%, rgba(8, 11, 17, 0.12) 0%, rgba(8, 11, 17, 0.65) 55%, rgba(8, 11, 17, 0.92) 100%);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+
+        .btn-sleek {
+            transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .btn-sleek:hover {
+            transform: translateY(-1px);
+        }
+        .btn-sleek:active {
+            transform: translateY(0) scale(0.985);
+        }
+
+        @keyframes pulseRing {
+            0% { transform: scale(0.9); opacity: 0.95; }
+            70% { transform: scale(1.7); opacity: 0; }
+            100% { transform: scale(1.7); opacity: 0; }
+        }
+        .joint-pulse {
+            transform-box: fill-box;
+            transform-origin: center;
+            animation: pulseRing 1.4s infinite cubic-bezier(0.2, 0.8, 0.4, 1);
+        }
+
+        @keyframes urgentBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.55; }
+        }
+        .animate-urgent-text {
+            animation: urgentBlink 0.65s infinite ease-in-out;
+        }
+
+        /* 세련된 3D 플로팅 토스트 태그 */
+        .floating-popup {
+            position: fixed;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            padding: 3px 10px;
+            border-radius: 9999px;
+            background: rgba(10, 14, 22, 0.86);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+            white-space: nowrap;
+            z-index: 15;
+            will-change: transform, opacity;
+        }
+
+        /* 병원 진료비 영수증 톱니 하단 효과 */
+        .receipt-edge {
+            background-image: linear-gradient(135deg, #F8F9FA 50%, transparent 50%),
+                              linear-gradient(225deg, #F8F9FA 50%, transparent 50%);
+            background-position: top left, top left;
+            background-size: 14px 14px;
+            background-repeat: repeat-x;
+        }
+    </style>
+</head>
+<body class="text-white antialiased">
+
+    <!-- Three.js 3D 캔버스 컨테이너 -->
+    <div id="webgl-container"></div>
+
+    <!-- 3D 투영 플로팅 토스트 레이어 -->
+    <div id="popup-layer" class="fixed inset-0 pointer-events-none overflow-hidden z-15"></div>
+
+    <!-- 클러치 슬로우 모션 비네트 오버레이 -->
+    <div id="slowmo-overlay" class="hidden fixed inset-0 pointer-events-none z-10 transition-opacity duration-200" style="box-shadow: inset 0 0 90px rgba(245, 162, 0, 0.35);">
+        <div class="fixed top-24 left-1/2 -translate-x-1/2 metro-glass px-4 py-1.5 rounded-full flex items-center gap-2 border-amber-400/50">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+            <span class="font-display text-xs font-bold tracking-widest text-amber-300 uppercase">Clutch Time Dilation</span>
+        </div>
+    </div>
+
+    <!-- ========================================================================
+         1. 인게임 미니멀 HUD (서울 지하철 역명판 & 인체 실루엣)
+         ======================================================================== -->
+    <div id="hud" class="hidden fixed inset-0 pointer-events-none z-20">
+        
+        <!-- 상단 중앙: 서울 지하철 LED 역명판 스타일 환승 진행 바 -->
+        <div class="fixed top-4 left-1/2 -translate-x-1/2 w-[calc(100%-6.5rem)] max-w-xl">
+            <div class="metro-glass rounded-2xl px-4 py-2.5 shadow-2xl">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                    <!-- 출발-도착 노선 배지 & 역명 -->
+                    <div class="flex items-center gap-2.5 min-w-0">
+                        <div class="flex items-center gap-1 shrink-0">
+                            <span id="hud-line-from" class="w-5 h-5 rounded-full flex items-center justify-center font-display font-bold text-[11px] text-white">2</span>
+                            <span class="text-white/30 text-[10px]">➔</span>
+                            <span id="hud-line-to" class="w-5 h-5 rounded-full flex items-center justify-center font-display font-bold text-[11px] text-slate-950">분</span>
+                        </div>
+                        <div class="truncate">
+                            <div class="flex items-center gap-1.5">
+                                <span id="hud-station-name" class="font-bold text-sm text-white tracking-tight">왕십리역</span>
+                                <span id="hud-route-desc" class="text-[11px] text-white/50 truncate hidden sm:inline">수인·분당선 환승 방면</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 우측 카운트다운 타이머 -->
+                    <div class="flex items-center gap-2 shrink-0">
+                        <span id="hud-door-status" class="text-[10px] font-semibold tracking-wider text-emerald-400 uppercase">OPEN</span>
+                        <span id="hud-timer" class="font-display text-lg sm:text-xl font-bold tabular-nums text-white leading-none">26.0</span>
+                    </div>
+                </div>
+
+                <!-- 얇은 실시간 노선 진행 트랙 (이동하는 플레이어 도트) -->
+                <div class="relative h-1.5 w-full bg-white/10 rounded-full flex items-center">
+                    <div id="hud-progress-bar" class="h-full rounded-full bg-emerald-400 transition-all duration-75" style="width: 0%;"></div>
+                    <!-- 움직이는 현재 위치 도트 -->
+                    <div id="hud-progress-dot" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)] border-2 border-emerald-500 transition-all duration-75" style="left: 0%;"></div>
+                    <!-- 종착 열차 아이콘 마커 -->
+                    <div class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-2.5 h-2.5 rounded-full bg-amber-400 border border-slate-950"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 우측 상단: 사운드 & 일시정지 미니멀 아이콘 필 버튼 -->
+        <div class="fixed top-4 right-4 flex items-center gap-1.5 pointer-events-auto">
+            <button id="btn-sound" onclick="toggleSound()" class="btn-sleek metro-glass w-10 h-10 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10" title="사운드 전환">
+                <svg id="icon-sound-on" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/>
+                </svg>
+                <svg id="icon-sound-off" class="w-4 h-4 hidden text-white/40" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>
+                </svg>
+            </button>
+            <button onclick="openMenu()" class="btn-sleek metro-glass w-10 h-10 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10" title="역 선택 메뉴">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- 좌측 하단: 미니멀 인체 실루엣 부상 다이어그램 & 커피 상태 -->
+        <div id="hud-body-panel" class="fixed bottom-4 left-4 metro-glass rounded-2xl p-3 flex items-center gap-3 shadow-2xl transition-all">
+            <!-- SVG 인체 실루엣 다이어그램 -->
+            <div class="relative w-12 h-24 shrink-0 flex items-center justify-center">
+                <svg viewBox="0 0 64 128" class="w-full h-full overflow-visible">
+                    <!-- 인체 기본 실루엣 -->
+                    <g fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.28)" stroke-width="1.5">
+                        <!-- 머리 -->
+                        <circle cx="32" cy="14" r="8"/>
+                        <!-- 몸통 -->
+                        <rect x="22" y="25" width="20" height="34" rx="6"/>
+                        <!-- 왼팔 -->
+                        <rect x="12" y="27" width="7" height="30" rx="3.5"/>
+                        <!-- 오른팔 -->
+                        <rect x="45" y="27" width="7" height="30" rx="3.5"/>
+                        <!-- 왼다리 -->
+                        <rect x="22" y="62" width="8" height="46" rx="4"/>
+                        <!-- 오른다리 -->
+                        <rect x="34" y="62" width="8" height="46" rx="4"/>
+                    </g>
+
+                    <!-- 관절 부상 인디케이터: 우측 어깨 (shoulder) -->
+                    <g id="svg-joint-shoulder" class="hidden">
+                        <circle cx="48.5" cy="30" r="6" fill="rgba(192,132,252,0.45)" class="joint-pulse"/>
+                        <circle cx="48.5" cy="30" r="3.5" fill="#c084fc"/>
+                    </g>
+
+                    <!-- 관절 부상 인디케이터: 허리 (back) -->
+                    <g id="svg-joint-back" class="hidden">
+                        <circle cx="32" cy="54" r="6.5" fill="rgba(251,191,36,0.45)" class="joint-pulse"/>
+                        <circle cx="32" cy="54" r="3.5" fill="#fbbf24"/>
+                    </g>
+
+                    <!-- 관절 부상 인디케이터: 우측 무릎 (knee) -->
+                    <g id="svg-joint-knee" class="hidden">
+                        <circle cx="38" cy="84" r="6" fill="rgba(251,146,60,0.45)" class="joint-pulse"/>
+                        <circle cx="38" cy="84" r="3.5" fill="#fb923c"/>
+                    </g>
+
+                    <!-- 관절 부상 인디케이터: 우측 발목 (ankle) -->
+                    <g id="svg-joint-ankle" class="hidden">
+                        <circle cx="38" cy="105" r="6.5" fill="rgba(244,63,94,0.5)" class="joint-pulse"/>
+                        <circle cx="38" cy="105" r="3.5" fill="#f43f5e"/>
+                    </g>
+                </svg>
+            </div>
+
+            <!-- 우측 부상 콜아웃 태그 & 커피/진료비 요약 -->
+            <div class="flex flex-col justify-between min-w-[104px] max-w-[155px] gap-1.5">
+                <div class="flex items-center justify-between gap-2 border-b border-white/10 pb-1">
+                    <span class="text-[10px] font-semibold tracking-wider text-white/50 uppercase">Condition</span>
+                    <!-- 아메리카노 보유 상태 아이콘 -->
+                    <span id="hud-coffee-status" class="text-[11px] font-semibold text-amber-300 flex items-center gap-1" title="아이스 아메리카노 보유 중">
+                        ☕ <span class="text-[10px]">ON</span>
+                    </span>
+                </div>
+
+                <!-- 활성 부상 콜아웃 리스트 -->
+                <div id="hud-injuries" class="flex flex-col gap-1 min-h-[38px] justify-center">
+                    <span class="text-[11px] font-medium text-emerald-400">정상 컨디션</span>
+                </div>
+
+                <!-- 누적 치료비 -->
+                <div class="flex items-center justify-between pt-1 border-t border-white/10">
+                    <span class="text-[10px] text-white/45">청구액</span>
+                    <span id="hud-bill" class="font-display text-xs font-bold tabular-nums text-white/90">₩0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 우측 하단 (데스크톱): 기력 필 바 & 미니멀 키캡 배지 -->
+        <div id="desktop-hud-right" class="fixed bottom-4 right-4 hidden md:flex flex-col items-end gap-2">
+            <!-- 기력(Stamina) 필 바 -->
+            <div class="metro-glass rounded-full px-3.5 py-2 flex items-center gap-2.5 shadow-xl">
+                <span class="text-[11px] font-semibold text-white/70">기력</span>
+                <div class="w-28 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div id="hud-stamina-bar" class="h-full bg-sky-400 rounded-full transition-all duration-75" style="width: 100%;"></div>
+                </div>
+            </div>
+
+            <!-- 울트라 클린 키캡 힌트 -->
+            <div class="flex items-center gap-1.5 text-[11px] text-white/60">
+                <span class="metro-glass px-2 py-1 rounded-md font-display text-[10px] text-white/80">WASD</span>
+                <span class="metro-glass px-2 py-1 rounded-md"><strong class="font-display text-[10px] text-sky-300">SHIFT</strong> 질주</span>
+                <span class="metro-glass px-2 py-1 rounded-md"><strong class="font-display text-[10px] text-amber-300">SPACE</strong> 다이빙</span>
+                <span class="metro-glass px-2 py-1 rounded-md"><strong class="font-display text-[10px] text-purple-300">R</strong> 힘풀기</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모바일 / 터치 전용 반투명 가상 컨트롤 -->
+    <div id="touch-controls" class="hidden fixed bottom-4 left-4 right-4 z-20 flex justify-between items-end pointer-events-none">
+        <!-- 가상 조이스틱 (좌측 하단 인체 HUD 위쪽에 배치) -->
+        <div id="joystick-zone" class="mb-28 w-24 h-24 rounded-full metro-glass relative pointer-events-auto flex items-center justify-center">
+            <div id="joystick-knob" class="w-9 h-9 rounded-full bg-white/75 shadow-lg pointer-events-none transition-transform duration-75"></div>
+        </div>
+
+        <!-- 우측 하단 액션 버튼 + 모바일 기력 바 -->
+        <div class="flex flex-col items-end gap-2.5 pointer-events-auto">
+            <div class="metro-glass rounded-full px-3 py-1 flex items-center gap-2">
+                <span class="text-[10px] font-semibold text-white/60">기력</span>
+                <div class="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div id="hud-stamina-bar-mobile" class="h-full bg-sky-400 rounded-full transition-all duration-75" style="width: 100%;"></div>
+                </div>
+            </div>
+            <div class="flex items-end gap-2">
+                <button id="btn-touch-flop" class="metro-glass w-12 h-12 rounded-full active:bg-white/20 flex flex-col items-center justify-center text-[10px] font-semibold text-purple-300">
+                    <span>힘풀기</span>
+                </button>
+                <button id="btn-touch-sprint" class="metro-glass w-14 h-14 rounded-full active:bg-white/20 flex flex-col items-center justify-center text-xs font-bold text-sky-300">
+                    <span>질주</span>
+                </button>
+                <button id="btn-touch-dive" class="w-16 h-16 rounded-full bg-amber-400 active:bg-amber-300 text-slate-950 shadow-xl flex flex-col items-center justify-center text-xs font-extrabold">
+                    <span>다이빙</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================
+         2. 시작 / 타이틀 오버레이 (라이브 3D 배경 + 비대칭 서울 지하철 안내판)
+         ======================================================================== -->
+    <div id="screen-menu" class="fixed inset-0 live-vignette z-30 flex items-center p-6 sm:p-12 overflow-y-auto">
+        <div class="w-full max-w-6xl mx-auto flex flex-col lg:flex-row lg:items-end justify-between gap-10">
+            
+            <!-- 좌측 비대칭 에디토리얼 타이틀 블록 -->
+            <div class="max-w-lg">
+                <!-- 서울 지하철 노선 원형 배지 스트립 -->
+                <div class="flex items-center gap-2 mb-5">
+                    <span class="w-6 h-6 rounded-full bg-[#0052A4] font-display font-bold text-xs flex items-center justify-center text-white">1</span>
+                    <span class="w-6 h-6 rounded-full bg-[#00A84D] font-display font-bold text-xs flex items-center justify-center text-white">2</span>
+                    <span class="w-6 h-6 rounded-full bg-[#EF7C1C] font-display font-bold text-xs flex items-center justify-center text-white">3</span>
+                    <span class="w-6 h-6 rounded-full bg-[#BDB092] font-display font-bold text-xs flex items-center justify-center text-slate-950">9</span>
+                    <span class="w-6 h-6 rounded-full bg-[#F5A200] font-display font-bold text-[11px] flex items-center justify-center text-slate-950">분</span>
+                    <span class="ml-2 font-display text-[11px] font-semibold tracking-widest text-white/50 uppercase">Seoul Metro 08:29 AM</span>
+                </div>
+
+                <p class="font-display text-xs sm:text-sm font-bold tracking-[0.22em] text-emerald-400 uppercase mb-2">
+                    TRANSFER RUSH 3D
+                </p>
+                <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-[1.08] mb-4">
+                    환승 러시 3D<br>
+                    <span class="text-white/75 font-bold">흐느적 출근길</span>
+                </h1>
+                <p class="text-sm text-white/60 leading-relaxed max-w-md mb-7">
+                    팔다리가 흐느적거리는 3D 물리 몸뚱이로 출근길 인파를 돌파하세요.
+                    발목이 삐거나 허리가 꺾여도 <span class="text-white font-semibold">다이빙(Space)</span>으로 닫히는 열차 문틈에 몸을 던져야 합니다.
+                </p>
+
+                <!-- 서울 지하철 역명판 스타일 환승 구간 선택 리스트 -->
+                <div class="space-y-2 mb-6" id="station-selector-list">
+                    <!-- 역 1: 왕십리 -->
+                    <button type="button" onclick="selectMenuStage(0)" data-stage="0" class="stage-row btn-sleek w-full metro-glass rounded-xl px-4 py-3 flex items-center justify-between text-left border-emerald-400/70 bg-white/10">
+                        <div class="flex items-center gap-3">
+                            <span class="w-6 h-6 rounded-full bg-[#00A84D] font-display font-bold text-xs flex items-center justify-center text-white shrink-0">2</span>
+                            <span class="font-bold text-sm sm:text-base text-white">왕십리</span>
+                            <span class="text-white/35 text-xs tracking-widest">──▶</span>
+                            <span class="px-2 py-0.5 rounded-full bg-[#F5A200] font-bold text-[11px] text-slate-950">수인·분당</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[11px] text-white/50 hidden sm:inline">혼잡도 보통</span>
+                            <span class="stage-check w-2 h-2 rounded-full bg-emerald-400"></span>
+                        </div>
+                    </button>
+
+                    <!-- 역 2: 신도림 -->
+                    <button type="button" onclick="selectMenuStage(1)" data-stage="1" class="stage-row btn-sleek w-full metro-glass rounded-xl px-4 py-3 flex items-center justify-between text-left opacity-75 hover:opacity-100">
+                        <div class="flex items-center gap-3">
+                            <span class="w-6 h-6 rounded-full bg-[#0052A4] font-display font-bold text-xs flex items-center justify-center text-white shrink-0">1</span>
+                            <span class="font-bold text-sm sm:text-base text-white">신도림</span>
+                            <span class="text-white/35 text-xs tracking-widest">──▶</span>
+                            <span class="w-6 h-6 rounded-full bg-[#00A84D] font-display font-bold text-xs flex items-center justify-center text-white shrink-0">2</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[11px] text-white/50 hidden sm:inline">혼잡도 높음</span>
+                            <span class="stage-check w-2 h-2 rounded-full bg-white/20"></span>
+                        </div>
+                    </button>
+
+                    <!-- 역 3: 고속터미널 -->
+                    <button type="button" onclick="selectMenuStage(2)" data-stage="2" class="stage-row btn-sleek w-full metro-glass rounded-xl px-4 py-3 flex items-center justify-between text-left opacity-75 hover:opacity-100">
+                        <div class="flex items-center gap-3">
+                            <span class="w-6 h-6 rounded-full bg-[#EF7C1C] font-display font-bold text-xs flex items-center justify-center text-white shrink-0">3</span>
+                            <span class="font-bold text-sm sm:text-base text-white">고속터미널</span>
+                            <span class="text-white/35 text-xs tracking-widest">──▶</span>
+                            <span class="px-2 py-0.5 rounded-full bg-[#BDB092] font-bold text-[11px] text-slate-950">9 급행</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[11px] text-rose-400/90 font-medium hidden sm:inline">지옥철 경보</span>
+                            <span class="stage-check w-2 h-2 rounded-full bg-white/20"></span>
+                        </div>
+                    </button>
+                </div>
+
+                <!-- 볼드 미니멀 CTA 버튼 -->
+                <div class="flex items-center gap-3">
+                    <button onclick="startStage(selectedMenuStage)" class="btn-sleek flex-1 sm:flex-none sm:min-w-[230px] bg-white hover:bg-emerald-400 text-slate-950 font-extrabold text-sm sm:text-base py-3.5 px-7 rounded-xl shadow-[0_12px_30px_rgba(0,0,0,0.4)] flex items-center justify-center gap-2.5">
+                        <span>출근길 뛰어들기</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 우측 하단: 조작 요약 미니멀 캡션 -->
+            <div class="metro-glass rounded-2xl p-4 max-w-xs w-full text-xs text-white/70 space-y-2.5 self-start lg:self-end">
+                <div class="flex items-center justify-between border-b border-white/10 pb-2">
+                    <span class="font-display text-[10px] font-bold tracking-widest text-white/45 uppercase">Controls</span>
+                    <span class="text-[10px] text-emerald-400 font-medium">3D Ragdoll Physics</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-white/55">이동 / 방향 조향</span>
+                    <span class="font-display text-[11px] text-white bg-white/10 px-2 py-0.5 rounded">WASD / 방향키</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-white/55">팔 휘저으며 질주</span>
+                    <span class="font-display text-[11px] text-sky-300 bg-white/10 px-2 py-0.5 rounded">SHIFT</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-white/55">인간 어뢰 다이빙</span>
+                    <span class="font-display text-[11px] text-amber-300 bg-white/10 px-2 py-0.5 rounded">SPACE</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-white/55">수동 힘풀기 (눕기)</span>
+                    <span class="font-display text-[11px] text-purple-300 bg-white/10 px-2 py-0.5 rounded">R</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ========================================================================
+         3. 정형외과 진료비 계산서·영수증 결과 모달 (오프화이트 종이 & 빨간 직인)
+         ======================================================================== -->
+    <div id="screen-result" class="hidden fixed inset-0 bg-slate-950/75 backdrop-blur-md z-30 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="max-w-md w-full flex flex-col gap-3 my-auto">
+            
+            <!-- 오프화이트 병원 영수증 본문 -->
+            <div class="bg-[#F8F9FA] text-slate-900 rounded-t-2xl p-6 sm:p-7 shadow-2xl relative overflow-hidden">
+                <!-- 상단 발급기관 헤더 & 스팀 스타일 랭크 배지 -->
+                <div class="flex items-start justify-between border-b-2 border-slate-900 pb-4 mb-4">
+                    <div>
+                        <span id="res-tag" class="inline-block font-display text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-slate-900 text-white mb-1.5">
+                            BOARDING RECEIPT
+                        </span>
+                        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-950">
+                            진료비 계산서 · 영수증
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">서울메트로 부설 환승역 정형외과의원</p>
+                    </div>
+
+                    <!-- 스팀 인디 스타일 랭크 스탬프 배지 -->
+                    <div class="flex flex-col items-center justify-center w-14 h-14 rounded-xl bg-slate-900 text-white shrink-0 shadow">
+                        <span class="font-display text-[9px] tracking-widest text-white/60 uppercase">RANK</span>
+                        <span id="res-rank" class="font-display text-3xl font-bold leading-none text-amber-400">S</span>
+                    </div>
+                </div>
+
+                <!-- 환자(직장인) 상태 요약 메타 테이블 -->
+                <div class="grid grid-cols-2 gap-y-1.5 text-xs border-b border-dashed border-slate-300 pb-3.5 mb-3.5">
+                    <div class="text-slate-500">환승 구간</div>
+                    <div id="res-station-route" class="text-right font-bold text-slate-900">왕십리역 (2호선 ➔ 수인분당)</div>
+
+                    <div class="text-slate-500">탑승 판정</div>
+                    <div id="res-title" class="text-right font-bold text-emerald-700">환승 열차 탑승 성공</div>
+
+                    <div class="text-slate-500">열차 출발 잔여시간</div>
+                    <div id="res-time" class="text-right font-display font-bold tabular-nums text-slate-900">3.2s</div>
+                </div>
+
+                <!-- 세부 상병 및 진료 내역 리스트 -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                        <span>상병명 및 처치 내역</span>
+                        <span>본인부담금</span>
+                    </div>
+                    <div id="res-injury-list" class="space-y-1.5 text-xs max-h-36 overflow-y-auto pr-1">
+                        <!-- 동적 삽입 -->
+                    </div>
+                </div>
+
+                <!-- 총액 합계 및 빨간 원형 진료확인인 직인 -->
+                <div class="border-t-2 border-slate-900 pt-3.5 flex items-end justify-between relative">
+                    <div>
+                        <p id="res-desc" class="text-[11px] text-slate-500 max-w-[230px] leading-snug mb-2">
+                            무사히 열차에 탑승하였습니다.
+                        </p>
+                        <span class="text-[11px] font-bold text-slate-600 block">총 치료비 청구액 (급여 손실)</span>
+                        <span id="res-total-bill" class="font-display text-2xl sm:text-3xl font-extrabold tabular-nums text-slate-950">₩0</span>
+                    </div>
+
+                    <!-- 빨간 원형 병원 직인 (진료확인인) -->
+                    <div class="w-16 h-16 rounded-full border-2 border-rose-600/80 text-rose-600/85 flex flex-col items-center justify-center text-[10px] font-extrabold leading-tight tracking-tighter -rotate-12 select-none shrink-0" style="box-shadow: inset 0 0 0 1px rgba(225,29,72,0.4);">
+                        <span>서울메트로</span>
+                        <span>정형외과</span>
+                        <span class="text-[9px] border-t border-rose-600/60 mt-0.5 pt-0.5">진료확인인</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 영수증 하단 톱니 장식 -->
+            <div class="h-3.5 w-full receipt-edge -mt-3"></div>
+
+            <!-- 하단 클린 액션 버튼 -->
+            <div class="grid grid-cols-2 gap-2.5 pt-1">
+                <button onclick="openMenu()" class="btn-sleek metro-glass py-3.5 px-4 rounded-xl text-white/85 hover:text-white font-bold text-sm">
+                    역 선택 메뉴
+                </button>
+                <button id="btn-next-stage" onclick="nextOrRetryStage()" class="btn-sleek py-3.5 px-4 rounded-xl bg-white hover:bg-emerald-400 text-slate-950 font-extrabold text-sm shadow-xl">
+                    다음 역 환승 ➔
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ============================================================================
+         * 1. 프로시저럴 Web Audio API 사운드 엔진 (발소리, 슬랩스틱 충돌, 뼈 꺾임 소리, 경고음)
+         * ============================================================================
+         */
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+                this.lastStepTime = 0;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playStep(isSprinting, isLimping) {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const interval = isLimping ? 0.34 : (isSprinting ? 0.16 : 0.25);
+                if (now - this.lastStepTime < interval) return;
+                this.lastStepTime = now;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                const pitch = isLimping ? 85 + Math.random() * 45 : (isSprinting ? 145 : 115);
+                osc.frequency.setValueAtTime(pitch, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 0.055);
+
+                gain.gain.setValueAtTime(0.06, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.065);
+            }
+
+            playDive() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(220, now);
+                osc.frequency.exponentialRampToValueAtTime(620, now + 0.18);
+                osc.frequency.exponentialRampToValueAtTime(140, now + 0.35);
+
+                gain.gain.setValueAtTime(0.22, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.37);
+            }
+
+            playBonk(heavy = false) {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                // 슬랩스틱 통통 튀는 타격음
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = heavy ? 'sawtooth' : 'triangle';
+                osc.frequency.setValueAtTime(heavy ? 180 : 260, now);
+                osc.frequency.exponentialRampToValueAtTime(48, now + 0.22);
+
+                gain.gain.setValueAtTime(heavy ? 0.3 : 0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.23);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.24);
+            }
+
+            playSprainCrack() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                // 뼈/관절 삐끗하는 우두둑 노이즈 버스트
+                const bufferSize = Math.floor(this.ctx.sampleRate * 0.14);
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    const env = Math.sin((i / bufferSize) * Math.PI);
+                    data[i] = (Math.random() * 2 - 1) * env * (i % 90 < 30 ? 1 : 0.2);
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 1100;
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.35, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start(now);
+            }
+
+            playHeal() {
+                if (!this.enabled) return;
+                this.init();
+                const notes = [523.25, 659.25, 783.99];
+                notes.forEach((f, idx) => {
+                    const now = this.ctx.currentTime + idx * 0.06;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(f, now);
+                    gain.gain.setValueAtTime(0.14, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.17);
+                });
+            }
+
+            playDoorBeep() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(987.77, now);
+                gain.gain.setValueAtTime(0.12, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.17);
+            }
+
+            playWin(isClutch) {
+                if (!this.enabled) return;
+                this.init();
+                const notes = isClutch ? [523.25, 659.25, 783.99, 1046.5, 1318.5] : [523.25, 659.25, 783.99, 1046.5];
+                notes.forEach((f, idx) => {
+                    const now = this.ctx.currentTime + idx * 0.085;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(f, now);
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.26);
+                });
+            }
+
+            playFail() {
+                if (!this.enabled) return;
+                this.init();
+                const notes = [392.0, 349.23, 311.13, 246.94];
+                notes.forEach((f, idx) => {
+                    const now = this.ctx.currentTime + idx * 0.14;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(f, now);
+                    gain.gain.setValueAtTime(0.14, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.23);
+                });
+            }
+        }
+
+        const sfx = new SoundFX();
+        function toggleSound() {
+            sfx.enabled = !sfx.enabled;
+            document.getElementById('icon-sound-on').classList.toggle('hidden', !sfx.enabled);
+            document.getElementById('icon-sound-off').classList.toggle('hidden', sfx.enabled);
+        }
+
+        /**
+         * ============================================================================
+         * 2. 스테이지 및 부상 데이터 정의
+         * ============================================================================
+         */
+        const STAGES = [
+            {
+                id: 0,
+                tag: 'STAGE 1',
+                name: '왕십리역',
+                routeDesc: '2호선 ➔ 수인·분당선 환승',
+                fromBadge: { text: '2', bg: '#00A84D', fg: '#ffffff' },
+                toBadge: { text: '분', bg: '#F5A200', fg: '#0f172a' },
+                trainColor: 0xF5A200,
+                corridorLength: 95, // 3D 월드 Z 길이 (0 에서 -95 까지 전진)
+                corridorWidth: 16,
+                timeLimit: 26.0,
+                doorCloseStart: 6.5,
+                crowdCount: 28,
+                wetZones: 3,
+                pickups: 3
+            },
+            {
+                id: 1,
+                tag: 'STAGE 2',
+                name: '신도림역',
+                routeDesc: '1호선 ➔ 2호선 지옥철 환승',
+                fromBadge: { text: '1', bg: '#0052A4', fg: '#ffffff' },
+                toBadge: { text: '2', bg: '#00A84D', fg: '#ffffff' },
+                trainColor: 0x00A84D,
+                corridorLength: 118,
+                corridorWidth: 17,
+                timeLimit: 29.0,
+                doorCloseStart: 7.0,
+                crowdCount: 44,
+                wetZones: 5,
+                pickups: 4
+            },
+            {
+                id: 2,
+                tag: 'STAGE 3',
+                name: '고속터미널역',
+                routeDesc: '3호선 ➔ 9호선 급행 막장통로',
+                fromBadge: { text: '3', bg: '#EF7C1C', fg: '#ffffff' },
+                toBadge: { text: '9', bg: '#BDB092', fg: '#0f172a' },
+                trainColor: 0xBDB092,
+                corridorLength: 140,
+                corridorWidth: 15.5,
+                timeLimit: 32.0,
+                doorCloseStart: 7.5,
+                crowdCount: 56,
+                wetZones: 7,
+                pickups: 5
+            }
+        ];
+
+        const INJURY_TYPES = {
+            ankle: {
+                id: 'ankle',
+                shortLabel: '발목 염좌',
+                label: '우측 발목 염좌 (삐끗)',
+                desc: '이동속도 -28% 및 보행 절뚝거림',
+                cost: 48000,
+                dotColor: 'bg-rose-500 text-rose-300'
+            },
+            knee: {
+                id: 'knee',
+                shortLabel: '무릎 연골',
+                label: '반월상 연골 충격 (무릎 꺾임)',
+                desc: '전력 질주 시 간헐적 다리 풀림',
+                cost: 65000,
+                dotColor: 'bg-orange-500 text-orange-300'
+            },
+            back: {
+                id: 'back',
+                shortLabel: '급성 요통',
+                label: '급성 요추 염좌 (허리 삐끗)',
+                desc: '상체 전방 굴곡 자세 고정',
+                cost: 82000,
+                dotColor: 'bg-amber-400 text-amber-300'
+            },
+            shoulder: {
+                id: 'shoulder',
+                shortLabel: '어깨 탈구',
+                label: '우측 견관절 탈구',
+                desc: '우측 상지 무력화',
+                cost: 120000,
+                dotColor: 'bg-purple-400 text-purple-300'
+            },
+            coffee: {
+                id: 'coffee',
+                shortLabel: '카페인 손실',
+                label: '아이스 아메리카노 파손',
+                desc: '기력 자연 회복 속도 -45%',
+                cost: 4500,
+                dotColor: 'bg-amber-600 text-amber-200'
+            }
+        };
+
+        let selectedMenuStage = 0;
+        function selectMenuStage(idx) {
+            selectedMenuStage = idx;
+            document.querySelectorAll('.stage-row').forEach((row) => {
+                const rowIdx = Number(row.dataset.stage);
+                const dot = row.querySelector('.stage-check');
+                if (rowIdx === idx) {
+                    row.classList.add('border-emerald-400/70', 'bg-white/10');
+                    row.classList.remove('opacity-75');
+                    dot.classList.remove('bg-white/20');
+                    dot.classList.add('bg-emerald-400');
+                } else {
+                    row.classList.remove('border-emerald-400/70', 'bg-white/10');
+                    row.classList.add('opacity-75');
+                    dot.classList.remove('bg-emerald-400');
+                    dot.classList.add('bg-white/20');
+                }
+            });
+        }
+
+        /**
+         * ============================================================================
+         * 3. Three.js 3D 씬, 조명, 프로시저럴 텍스처 초기화
+         * ============================================================================
+         */
+        const container = document.getElementById('webgl-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f172a);
+        scene.fog = new THREE.FogExp2(0x0f172a, 0.013);
+
+        const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 220);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 조명 설정 (역사 형광등 환경광 + 그림자 방향광)
+        const ambientLight = new THREE.AmbientLight(0xdbeafe, 0.68);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+        dirLight.position.set(14, 34, 18);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 2;
+        dirLight.shadow.camera.far = 110;
+        const d = 28;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+        scene.add(dirLight.target);
+
+        // 프로시저럴 지하철 타일 텍스처 생성
+        function createTileTexture() {
+            const c = document.createElement('canvas');
+            c.width = 256;
+            c.height = 256;
+            const g = c.getContext('2d');
+            g.fillStyle = '#cbd5e1';
+            g.fillRect(0, 0, 256, 256);
+
+            // 미세한 화강암 점박이 질감
+            for (let i = 0; i < 600; i++) {
+                g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.25)' : 'rgba(71,85,105,0.18)';
+                g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+            }
+
+            // 타일 줄눈
+            g.strokeStyle = '#94a3b8';
+            g.lineWidth = 4;
+            g.strokeRect(0, 0, 128, 128);
+            g.strokeRect(128, 0, 128, 128);
+            g.strokeRect(0, 128, 128, 128);
+            g.strokeRect(128, 128, 128, 128);
+
+            const tex = new THREE.CanvasTexture(c);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        const baseTileTex = createTileTexture();
+
+        /**
+         * ============================================================================
+         * 4. 3D 다관절 흐느적 래그돌 캐릭터 빌더 (스프링-댐퍼 관절 물리 포함)
+         * ============================================================================
+         */
+        class ArticulatedRagdoll {
+            constructor(options = {}) {
+                this.isPlayer = !!options.isPlayer;
+                this.type = options.type || 'normal';
+                this.shirtColor = options.shirtColor || 0x3b82f6;
+                this.pantsColor = options.pantsColor || 0x1e293b;
+                this.hairColor = options.hairColor || 0x1e293b;
+
+                this.root = new THREE.Group();
+
+                // 재질 정의
+                const skinMat = new THREE.MeshStandardMaterial({ color: 0xfde68a, roughness: 0.6 });
+                const shirtMat = new THREE.MeshStandardMaterial({ color: this.shirtColor, roughness: 0.7 });
+                const pantsMat = new THREE.MeshStandardMaterial({ color: this.pantsColor, roughness: 0.8 });
+                const hairMat = new THREE.MeshStandardMaterial({ color: this.hairColor, roughness: 0.9 });
+                const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
+
+                // 1) 골반 피벗 (전체 몸통 중심)
+                this.pelvis = new THREE.Group();
+                this.pelvis.position.y = 0.95;
+                this.root.add(this.pelvis);
+
+                const hipMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.24, 0.28), pantsMat);
+                hipMesh.castShadow = true;
+                this.pelvis.add(hipMesh);
+
+                // 2) 상체(척추) 피벗 - 허리 삐끗 시 앞으로 꺾임
+                this.spine = new THREE.Group();
+                this.spine.position.y = 0.12;
+                this.pelvis.add(this.spine);
+
+                const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.58, 0.30), shirtMat);
+                torsoMesh.position.y = 0.29;
+                torsoMesh.castShadow = true;
+                this.spine.add(torsoMesh);
+
+                // 직장인 넥타이 (플레이어 전용 디테일)
+                if (this.isPlayer) {
+                    const tieMat = new THREE.MeshStandardMaterial({ color: 0xe11d48 });
+                    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.36, 0.04), tieMat);
+                    tie.position.set(0, 0.32, -0.16);
+                    this.spine.add(tie);
+                }
+
+                // 3) 목 & 머리 피벗 (출렁거리는 bobblehead 스프링)
+                this.neck = new THREE.Group();
+                this.neck.position.y = 0.60;
+                this.spine.add(this.neck);
+
+                const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.38), skinMat);
+                headMesh.position.y = 0.20;
+                headMesh.castShadow = true;
+                this.neck.add(headMesh);
+
+                // 머리카락
+                const hairMesh = new THREE.Mesh(new THREE.BoxGeometry(0.41, 0.18, 0.41), hairMat);
+                hairMesh.position.set(0, 0.33, 0.02);
+                hairMesh.castShadow = true;
+                this.neck.add(hairMesh);
+
+                // 눈 (정면 -Z 방향)
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+                const leftEye = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.04), eyeMat);
+                leftEye.position.set(-0.09, 0.21, -0.19);
+                const rightEye = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.04), eyeMat);
+                rightEye.position.set(0.09, 0.21, -0.19);
+                this.neck.add(leftEye, rightEye);
+
+                // 4) 좌/우 팔 (어깨 + 팔꿈치 2단 관절로 흐느적거림 극대화)
+                this.leftShoulder = this.createLimb(0.14, 0.32, shirtMat, -0.34, 0.50, 0);
+                this.spine.add(this.leftShoulder.pivot);
+                this.leftElbow = this.createLimb(0.12, 0.30, skinMat, 0, -0.32, 0);
+                this.leftShoulder.pivot.add(this.leftElbow.pivot);
+
+                this.rightShoulder = this.createLimb(0.14, 0.32, shirtMat, 0.34, 0.50, 0);
+                this.spine.add(this.rightShoulder.pivot);
+                this.rightElbow = this.createLimb(0.12, 0.30, skinMat, 0, -0.32, 0);
+                this.rightShoulder.pivot.add(this.rightElbow.pivot);
+
+                // 5) 좌/우 다리 (고관절 + 무릎 2단 관절 + 신발)
+                this.leftHip = this.createLimb(0.17, 0.38, pantsMat, -0.14, -0.08, 0);
+                this.pelvis.add(this.leftHip.pivot);
+                this.leftKnee = this.createLimb(0.15, 0.38, pantsMat, 0, -0.38, 0);
+                this.leftHip.pivot.add(this.leftKnee.pivot);
+                const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.28), shoeMat);
+                leftShoe.position.set(0, -0.38, -0.05);
+                this.leftKnee.pivot.add(leftShoe);
+
+                this.rightHip = this.createLimb(0.17, 0.38, pantsMat, 0.14, -0.08, 0);
+                this.pelvis.add(this.rightHip.pivot);
+                this.rightKnee = this.createLimb(0.15, 0.38, pantsMat, 0, -0.38, 0);
+                this.rightHip.pivot.add(this.rightKnee.pivot);
+                const rightShoe = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.28), shoeMat);
+                rightShoe.position.set(0, -0.38, -0.05);
+                this.rightKnee.pivot.add(rightShoe);
+
+                // 6) 소품 부착 (플레이어: 서류가방 + 아메리카노 / NPC: 스마트폰 또는 캐리어)
+                if (this.isPlayer) {
+                    // 왼손 서류가방
+                    const bagMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.5 });
+                    this.briefcaseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, 0.42), bagMat);
+                    this.briefcaseMesh.position.set(-0.04, -0.36, 0);
+                    this.briefcaseMesh.castShadow = true;
+                    this.leftElbow.pivot.add(this.briefcaseMesh);
+
+                    // 오른손 아이스 아메리카노 컵
+                    this.coffeeGroup = new THREE.Group();
+                    const cupMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+                    const coffeeLiquidMat = new THREE.MeshStandardMaterial({ color: 0x3e1f0d });
+                    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.18, 10), cupMat);
+                    const liq = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.042, 0.14, 10), coffeeLiquidMat);
+                    liq.position.y = -0.01;
+                    this.coffeeGroup.add(cup, liq);
+                    this.coffeeGroup.position.set(0.04, -0.32, -0.06);
+                    this.rightElbow.pivot.add(this.coffeeGroup);
+                } else if (this.type === 'zombie') {
+                    // 스마트폰 좀비: 빛나는 스마트폰 화면
+                    const phoneMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+                    const phone = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.20), phoneMat);
+                    phone.position.set(0, -0.28, -0.14);
+                    this.rightElbow.pivot.add(phone);
+                } else if (this.type === 'carrier') {
+                    // 캐리어 빌런: 뒤에 끌고 다니는 큰 여행용 캐리어
+                    const caseMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.4 });
+                    this.suitcaseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.65, 0.30), caseMat);
+                    this.suitcaseMesh.position.set(0.45, 0.38, 0.35);
+                    this.suitcaseMesh.rotation.x = 0.25;
+                    this.suitcaseMesh.castShadow = true;
+                    this.root.add(this.suitcaseMesh);
+                }
+
+                // 관절 스프링 물리 상태 (속도 오프셋 및 래그돌 회전)
+                this.spring = {
+                    headRotX: 0, headRotZ: 0, headVelX: 0, headVelZ: 0,
+                    spineRotX: 0, spineRotZ: 0, spineVelX: 0, spineVelZ: 0,
+                    armFlailPhase: Math.random() * 10
+                };
+            }
+
+            createLimb(thickness, length, material, px, py, pz) {
+                const pivot = new THREE.Group();
+                pivot.position.set(px, py, pz);
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(thickness, length, thickness), material);
+                mesh.position.y = -length / 2;
+                mesh.castShadow = true;
+                pivot.add(mesh);
+                return { pivot, mesh };
+            }
+
+            /**
+             * 매 프레임 관절 스프링-댐퍼 & 래그돌/부상 애니메이션 업데이트
+             */
+            updatePose(dt, state) {
+                const { speed, isSprinting, isRagdoll, ragdollRot, injuries, stepPhase, accelX, accelZ } = state;
+                const sp = this.spring;
+
+                // 1) 머리/척추 관성 스프링 계산 (가속도에 반대로 젖혀짐)
+                const targetHeadX = Math.max(-0.5, Math.min(0.5, accelZ * 0.04));
+                const targetHeadZ = Math.max(-0.5, Math.min(0.5, -accelX * 0.04));
+                sp.headVelX += (targetHeadX - sp.headRotX) * 55 * dt - sp.headVelX * 7 * dt;
+                sp.headVelZ += (targetHeadZ - sp.headRotZ) * 55 * dt - sp.headVelZ * 7 * dt;
+                sp.headRotX += sp.headVelX * dt;
+                sp.headRotZ += sp.headVelZ * dt;
+
+                if (isRagdoll) {
+                    // [풀 3D 래그돌 상태]: 몸 전체가 바닥에 구르며 팔다리가 사방으로 펄럭임!
+                    this.pelvis.position.y = 0.32;
+                    this.pelvis.rotation.set(ragdollRot.x, ragdollRot.y, ragdollRot.z);
+
+                    const flail = Math.sin(performance.now() * 0.018 + sp.armFlailPhase);
+                    const flail2 = Math.cos(performance.now() * 0.015 + sp.armFlailPhase);
+
+                    this.spine.rotation.set(0.4 * flail, 0.3 * flail2, 0.4 * flail2);
+                    this.neck.rotation.set(0.6 * flail2, 0, 0.5 * flail);
+
+                    this.leftShoulder.pivot.rotation.set(-1.4 + flail * 0.8, 0, -0.9 - flail2 * 0.5);
+                    this.leftElbow.pivot.rotation.set(-0.7 + flail2 * 0.6, 0, 0);
+
+                    this.rightShoulder.pivot.rotation.set(-1.4 - flail * 0.8, 0, 0.9 + flail2 * 0.5);
+                    this.rightElbow.pivot.rotation.set(-0.7 - flail2 * 0.6, 0, 0);
+
+                    this.leftHip.pivot.rotation.set(0.8 * flail, 0, -0.35);
+                    this.leftKnee.pivot.rotation.set(0.9 + 0.5 * flail2, 0, 0);
+
+                    this.rightHip.pivot.rotation.set(-0.8 * flail, 0, 0.35);
+                    this.rightKnee.pivot.rotation.set(0.9 - 0.5 * flail2, 0, 0);
+                    return;
+                }
+
+                // [직립 보행 / 질주 / 부상 절뚝거림 상태]
+                this.pelvis.rotation.set(0, 0, 0);
+
+                const hasAnkle = injuries && injuries.has('ankle');
+                const hasBack = injuries && injuries.has('back');
+                const hasShoulder = injuries && injuries.has('shoulder');
+
+                const moveFactor = Math.min(1.5, speed / 6.0);
+                const bounce = Math.abs(Math.sin(stepPhase)) * 0.09 * moveFactor;
+                const limpTilt = hasAnkle ? Math.sin(stepPhase) * 0.24 : Math.sin(stepPhase) * 0.05 * moveFactor;
+
+                this.pelvis.position.y = 0.93 + bounce - (hasBack ? 0.08 : 0);
+                this.pelvis.rotation.z = limpTilt;
+
+                // 허리 삐끗 부상 시 상체가 앞으로 40도 굽어짐
+                const baseHunch = hasBack ? 0.68 : (isSprinting ? 0.22 : 0.06);
+                this.spine.rotation.x = baseHunch + sp.headRotX * 0.4;
+                this.spine.rotation.z = -limpTilt * 0.6 + sp.headRotZ * 0.4;
+
+                // 머리 출렁임
+                this.neck.rotation.x = -baseHunch * 0.6 + sp.headRotX;
+                this.neck.rotation.z = sp.headRotZ;
+
+                // 다리 스윙 (발목 부상 시 오른쪽 다리를 질질 끔)
+                const legSwing = Math.sin(stepPhase) * (isSprinting ? 0.95 : 0.65) * moveFactor;
+                this.leftHip.pivot.rotation.set(legSwing, 0, 0);
+                this.leftKnee.pivot.rotation.set(Math.max(0, -legSwing * 1.1), 0, 0);
+
+                if (hasAnkle) {
+                    // 삐끗한 오른쪽 다리는 보폭이 좁고 바깥쪽으로 꺾임
+                    this.rightHip.pivot.rotation.set(-legSwing * 0.35, 0, 0.18);
+                    this.rightKnee.pivot.rotation.set(0.28, 0, -0.15);
+                } else {
+                    this.rightHip.pivot.rotation.set(-legSwing, 0, 0);
+                    this.rightKnee.pivot.rotation.set(Math.max(0, legSwing * 1.1), 0, 0);
+                }
+
+                // 팔 흔들기 (질주 시 휴먼 폴 플랫처럼 팔을 높이 휘저음!)
+                if (this.type === 'zombie') {
+                    // 스마트폰 좀비는 양팔로 폰을 들고 있음
+                    this.leftShoulder.pivot.rotation.set(-0.9, 0, -0.25);
+                    this.leftElbow.pivot.rotation.set(-0.9, 0, 0);
+                    this.rightShoulder.pivot.rotation.set(-0.9, 0, 0.25);
+                    this.rightElbow.pivot.rotation.set(-0.9, 0, 0);
+                } else {
+                    const armAmp = isSprinting ? 1.25 : 0.65 * moveFactor;
+                    const flailSide = isSprinting ? 0.45 + Math.sin(stepPhase * 2) * 0.25 : 0.14;
+
+                    this.leftShoulder.pivot.rotation.set(-legSwing * armAmp, 0, -flailSide);
+                    this.leftElbow.pivot.rotation.set(-0.35 - Math.abs(Math.sin(stepPhase)) * 0.4, 0, 0);
+
+                    if (hasShoulder) {
+                        // 어깨 탈구 부상 시 오른팔이 완전히 힘없이 축 처져서 흔들림
+                        this.rightShoulder.pivot.rotation.set(Math.sin(stepPhase * 0.7) * 0.25, 0, 0.22 + limpTilt);
+                        this.rightElbow.pivot.rotation.set(0.05, 0, 0);
+                    } else {
+                        this.rightShoulder.pivot.rotation.set(legSwing * armAmp, 0, flailSide);
+                        this.rightElbow.pivot.rotation.set(-0.35 - Math.abs(Math.cos(stepPhase)) * 0.4, 0, 0);
+                    }
+                }
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 5. 입력 처리 (WASD/방향키, Shift, Space 다이빙, R 수동 래그돌, 가상 조이스틱)
+         * ============================================================================
+         */
+        const keys = { up: false, down: false, left: false, right: false, shift: false };
+        const joystick = { active: false, dx: 0, dy: 0 };
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.up = true;
+            if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.down = true;
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = true;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = true;
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.shift = true;
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (game.state === 'PLAYING') triggerPlayerDive();
+            }
+            if (e.code === 'KeyR') {
+                if (game.state === 'PLAYING') triggerManualRagdoll();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.up = false;
+            if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.down = false;
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = false;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = false;
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.shift = false;
+        });
+
+        // 모바일 가상 조이스틱
+        const joyZone = document.getElementById('joystick-zone');
+        const joyKnob = document.getElementById('joystick-knob');
+
+        function handleJoy(cx, cy) {
+            const rect = joyZone.getBoundingClientRect();
+            const midX = rect.left + rect.width / 2;
+            const midY = rect.top + rect.height / 2;
+            const maxR = rect.width / 2 - 14;
+            let dx = cx - midX;
+            let dy = cy - midY;
+            const d = Math.hypot(dx, dy);
+            if (d > maxR) {
+                dx = (dx / d) * maxR;
+                dy = (dy / d) * maxR;
+            }
+            joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+            joystick.dx = dx / maxR;
+            joystick.dy = dy / maxR;
+        }
+
+        joyZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            joystick.active = true;
+            handleJoy(e.touches[0].clientX, e.touches[0].clientY);
+        });
+        joyZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (joystick.active) handleJoy(e.touches[0].clientX, e.touches[0].clientY);
+        });
+        const endJoy = () => {
+            joystick.active = false;
+            joystick.dx = 0;
+            joystick.dy = 0;
+            joyKnob.style.transform = `translate(0px, 0px)`;
+        };
+        joyZone.addEventListener('touchend', endJoy);
+        joyZone.addEventListener('touchcancel', endJoy);
+
+        document.getElementById('btn-touch-sprint').addEventListener('touchstart', (e) => { e.preventDefault(); keys.shift = true; });
+        document.getElementById('btn-touch-sprint').addEventListener('touchend', (e) => { e.preventDefault(); keys.shift = false; });
+        document.getElementById('btn-touch-dive').addEventListener('touchstart', (e) => { e.preventDefault(); if (game.state === 'PLAYING') triggerPlayerDive(); });
+        document.getElementById('btn-touch-flop').addEventListener('touchstart', (e) => { e.preventDefault(); if (game.state === 'PLAYING') triggerManualRagdoll(); });
+
+        /**
+         * ============================================================================
+         * 6. 게임 상태 & 3D 월드 구축
+         * ============================================================================
+         */
+        const SHIRT_PALETTE = [0x3b82f6, 0x64748b, 0xec4899, 0x8b5cf6, 0x14b8a6, 0xf97316, 0xe2e8f0, 0x475569];
+        const HAIR_PALETTE = [0x0f172a, 0x1e293b, 0x451a03, 0x78350f, 0x334155];
+
+        const game = {
+            state: 'MENU',
+            stageIndex: 0,
+            stage: STAGES[0],
+            timeLeft: 26.0,
+            lastBeepSec: 99,
+            timeScale: 1.0, // 슬로우 모션 배율
+            shakeTime: 0,
+            shakeIntensity: 0,
+
+            worldGroup: new THREE.Group(),
+            player: null,
+            npcs: [],
+            pillars: [],
+            escalators: [],
+            wetZones: [],
+            pickups: [],
+            flyingProps: [], // 날아가는 커피컵, 서류가방
+            popups: [],
+
+            train: {
+                z: -95,
+                doorOpenRatio: 1.0,
+                doorMeshes: [],
+                doorCentersX: [-4.2, 0, 4.2],
+                doorWidth: 2.3
+            }
+        };
+
+        scene.add(game.worldGroup);
+
+        function clearWorld() {
+            while (game.worldGroup.children.length > 0) {
+                game.worldGroup.remove(game.worldGroup.children[0]);
+            }
+            document.getElementById('popup-layer').innerHTML = '';
+            game.npcs = [];
+            game.pillars = [];
+            game.escalators = [];
+            game.wetZones = [];
+            game.pickups = [];
+            game.flyingProps = [];
+            game.popups = [];
+            game.train.doorMeshes = [];
+        }
+
+        function buildStageWorld(stageIdx) {
+            clearWorld();
+            const stage = STAGES[stageIdx];
+            game.stageIndex = stageIdx;
+            game.stage = stage;
+            game.timeLeft = stage.timeLimit;
+            game.lastBeepSec = 99;
+            game.timeScale = 1.0;
+            game.shakeTime = 0;
+
+            const L = stage.corridorLength;
+            const W = stage.corridorWidth;
+            const halfW = W / 2;
+
+            // 1) 바닥 타일 메시
+            const floorTex = baseTileTex.clone();
+            floorTex.needsUpdate = true;
+            floorTex.repeat.set(W / 2, L / 2);
+
+            const floorGeo = new THREE.PlaneGeometry(W, L + 16);
+            const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.55 });
+            const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.position.set(0, 0, -L / 2 + 4);
+            floorMesh.receiveShadow = true;
+            game.worldGroup.add(floorMesh);
+
+            // 중앙 노선 유도선 띠
+            const guideMat = new THREE.MeshBasicMaterial({ color: stage.trainColor, transparent: true, opacity: 0.45 });
+            const guideStrip = new THREE.Mesh(new THREE.PlaneGeometry(0.9, L - 6), guideMat);
+            guideStrip.rotation.x = -Math.PI / 2;
+            guideStrip.position.set(0, 0.01, -L / 2);
+            game.worldGroup.add(guideStrip);
+
+            // 2) 좌우 벽면 및 노선 컬러 띠
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
+            const stripeMat = new THREE.MeshStandardMaterial({ color: stage.trainColor, emissive: stage.trainColor, emissiveIntensity: 0.25 });
+
+            [-halfW - 0.5, halfW + 0.5].forEach((wx) => {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 4.5, L + 16), wallMat);
+                wall.position.set(wx, 2.25, -L / 2 + 4);
+                wall.receiveShadow = true;
+                game.worldGroup.add(wall);
+
+                const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.35, L + 16), stripeMat);
+                stripe.position.set(wx, 1.6, -L / 2 + 4);
+                game.worldGroup.add(stripe);
+            });
+
+            // 3) 도착 승강장 3D 지하철 전동차 & 애니메이션 슬라이딩 도어
+            game.train.z = -L;
+            game.train.doorOpenRatio = 1.0;
+            build3DTrain(stage, W);
+
+            // 4) 에스컬레이터 배치
+            const escZ1 = -L * 0.38;
+            addEscalator(-halfW + 2.2, escZ1, 2.2, 12, -1); // 상행 가속
+            addEscalator(halfW - 2.2, escZ1, 2.2, 12, 1);   // 하행 역주행 감속
+
+            if (stageIdx >= 1) {
+                addEscalator(0, -L * 0.68, 2.4, 11, -1);
+            }
+
+            // 5) 콘크리트 기둥 배치
+            const pillarMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.6 });
+            for (let z = -16; z > -L + 14; z -= 14) {
+                const nearEsc = game.escalators.some(e => Math.abs(e.z - z) < 8.5);
+                if (!nearEsc) {
+                    [-halfW * 0.48, halfW * 0.48].forEach((px) => {
+                        const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 4.5, 16), pillarMat);
+                        pil.position.set(px, 2.25, z);
+                        pil.castShadow = true;
+                        pil.receiveShadow = true;
+                        game.worldGroup.add(pil);
+                        game.pillars.push({ x: px, z: z, r: 0.72 });
+                    });
+                }
+            }
+
+            // 6) 젖은 바닥 (미끄럼 물웅덩이 + 노란 입간판)
+            const puddleMat = new THREE.MeshStandardMaterial({
+                color: 0x38bdf8,
+                roughness: 0.1,
+                metalness: 0.3,
+                transparent: true,
+                opacity: 0.65
+            });
+            const signMat = new THREE.MeshStandardMaterial({ color: 0xfacc15 });
+
+            for (let i = 0; i < stage.wetZones; i++) {
+                const wz = -12 - ((L - 22) / (stage.wetZones + 1)) * (i + 1);
+                const wx = (Math.random() - 0.5) * (W - 5.5);
+                const puddle = new THREE.Mesh(new THREE.CircleGeometry(1.75, 24), puddleMat);
+                puddle.rotation.x = -Math.PI / 2;
+                puddle.position.set(wx, 0.015, wz);
+                game.worldGroup.add(puddle);
+
+                // 미끄럼 주의 노란 A자 표지판
+                const sign = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.65, 0.22), signMat);
+                sign.position.set(wx + 1.4, 0.32, wz);
+                sign.castShadow = true;
+                game.worldGroup.add(sign);
+
+                game.wetZones.push({ x: wx, z: wz, r: 1.75 });
+            }
+
+            // 7) 회복 아이템: 초록색 파스 / 에너지 드링크 픽업
+            const healMat = new THREE.MeshStandardMaterial({
+                color: 0x10b981,
+                emissive: 0x059669,
+                emissiveIntensity: 0.5
+            });
+            for (let i = 0; i < stage.pickups; i++) {
+                const pz = -18 - ((L - 28) / stage.pickups) * i;
+                const px = (Math.random() - 0.5) * (W - 4);
+                const group = new THREE.Group();
+                const cross1 = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.22, 0.22), healMat);
+                const cross2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.65, 0.22), healMat);
+                group.add(cross1, cross2);
+                group.position.set(px, 0.85, pz);
+                game.worldGroup.add(group);
+                game.pickups.push({ mesh: group, x: px, z: pz, active: true });
+            }
+
+            // 8) 플레이어 3D 래그돌 생성
+            const playerRagdoll = new ArticulatedRagdoll({
+                isPlayer: true,
+                shirtColor: 0x0ea5e9,
+                pantsColor: 0x0f172a,
+                hairColor: 0x0f172a
+            });
+            playerRagdoll.root.position.set(0, 0, -2);
+            game.worldGroup.add(playerRagdoll.root);
+
+            game.player = {
+                ragdoll: playerRagdoll,
+                x: 0,
+                z: -2,
+                vx: 0,
+                vz: 0,
+                yaw: 0,
+                radius: 0.48,
+                stamina: 100,
+                maxStamina: 100,
+                stepPhase: 0,
+
+                // 래그돌 & 다이빙 상태
+                isRagdoll: false,
+                ragdollTimer: 0,
+                ragdollRot: { x: Math.PI / 2, y: 0, z: 0 },
+                ragdollSpin: { x: 0, y: 0, z: 0 },
+                isDiving: false,
+                diveTimer: 0,
+                invulnTimer: 0,
+
+                // 신체 부상 목록 (Set) & 진단서 기록 배열
+                injuries: new Set(),
+                medicalLog: [],
+                totalBill: 0,
+                kneeStumbleTimer: 1.5
+            };
+
+            // 9) 3D 출근길 인파 NPC 스폰
+            spawn3DCrowd(stage);
+
+            // 카메라 초기 배치
+            camera.position.set(0, 5.2, 4.8);
+            camera.lookAt(0, 1.2, -8);
+        }
+
+        function build3DTrain(stage, W) {
+            const tz = game.train.z;
+            // 노란 점자 안전선
+            const yellowMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+            const safetyLine = new THREE.Mesh(new THREE.PlaneGeometry(W, 0.45), yellowMat);
+            safetyLine.rotation.x = -Math.PI / 2;
+            safetyLine.position.set(0, 0.02, tz + 1.8);
+            game.worldGroup.add(safetyLine);
+
+            // 전동차 차체 (은색 스테인리스 + 노선 컬러 띠)
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.4, roughness: 0.3 });
+            const stripeMat = new THREE.MeshStandardMaterial({ color: stage.trainColor, roughness: 0.4 });
+            const interiorMat = new THREE.MeshBasicMaterial({ color: 0xfef08a }); // 따뜻한 열차 실내 조명
+
+            // 열차 지붕 & 후면 벽
+            const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 2, 0.4, 3.6), bodyMat);
+            roof.position.set(0, 3.3, tz - 1.5);
+            roof.castShadow = true;
+            game.worldGroup.add(roof);
+
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(W + 2, 3.2, 0.4), interiorMat);
+            backWall.position.set(0, 1.6, tz - 3.1);
+            game.worldGroup.add(backWall);
+
+            // 출입문 3개를 제외한 앞면 차체 기둥
+            const frontSegments = [
+                { x: -6.8, w: 3.0 },
+                { x: -2.1, w: 1.9 },
+                { x: 2.1,  w: 1.9 },
+                { x: 6.8,  w: 3.0 }
+            ];
+            frontSegments.forEach(seg => {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(seg.w, 3.1, 0.35), bodyMat);
+                wall.position.set(seg.x, 1.55, tz);
+                wall.castShadow = true;
+                game.worldGroup.add(wall);
+
+                const band = new THREE.Mesh(new THREE.BoxGeometry(seg.w + 0.02, 0.4, 0.38), stripeMat);
+                band.position.set(seg.x, 1.3, tz);
+                game.worldGroup.add(band);
+            });
+
+            // 3개의 출입문 슬라이딩 도어 메시 생성
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.5, roughness: 0.3 });
+            const dw = game.train.doorWidth;
+
+            game.train.doorCentersX.forEach((cx) => {
+                const leftDoor = new THREE.Mesh(new THREE.BoxGeometry(dw / 2, 2.7, 0.18), doorMat);
+                const rightDoor = new THREE.Mesh(new THREE.BoxGeometry(dw / 2, 2.7, 0.18), doorMat);
+                leftDoor.position.set(cx - dw * 0.72, 1.35, tz);
+                rightDoor.position.set(cx + dw * 0.72, 1.35, tz);
+                game.worldGroup.add(leftDoor, rightDoor);
+
+                game.train.doorMeshes.push({ cx, leftDoor, rightDoor });
+            });
+        }
+
+        function addEscalator(x, z, w, length, dir) {
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+            const railMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
+            const stepMat = new THREE.MeshStandardMaterial({ color: dir === -1 ? 0x10b981 : 0xf43f5e, roughness: 0.5 });
+
+            const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, length), frameMat);
+            base.position.set(x, 0.08, z);
+            base.receiveShadow = true;
+            game.worldGroup.add(base);
+
+            // 양쪽 핸드레일
+            [-w / 2, w / 2].forEach(ox => {
+                const rail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.95, length), railMat);
+                rail.position.set(x + ox, 0.48, z);
+                rail.castShadow = true;
+                game.worldGroup.add(rail);
+            });
+
+            // 움직이는 발판 띠들
+            const steps = [];
+            for (let sz = -length / 2 + 0.6; sz < length / 2; sz += 1.2) {
+                const st = new THREE.Mesh(new THREE.BoxGeometry(w - 0.35, 0.05, 0.35), stepMat);
+                st.position.set(x, 0.17, z + sz);
+                game.worldGroup.add(st);
+                steps.push({ mesh: st, localZ: sz });
+            }
+
+            game.escalators.push({ x, z, w, length, dir, steps });
+        }
+
+        function spawn3DCrowd(stage) {
+            const halfW = stage.corridorWidth / 2 - 1.1;
+            const L = stage.corridorLength;
+
+            for (let i = 0; i < stage.crowdCount; i++) {
+                const z = -9 - Math.random() * (L - 16);
+                const x = (Math.random() * 2 - 1) * halfW;
+
+                // 기둥과 겹치면 스킵
+                if (game.pillars.some(p => Math.hypot(p.x - x, p.z - z) < 1.5)) continue;
+
+                const r = Math.random();
+                let type = 'normal';
+                if (r < 0.26) type = 'zombie';
+                else if (r < 0.48) type = 'carrier';
+                else if (r < 0.72) type = 'rusher';
+
+                const shirtColor = SHIRT_PALETTE[Math.floor(Math.random() * SHIRT_PALETTE.length)];
+                const hairColor = HAIR_PALETTE[Math.floor(Math.random() * HAIR_PALETTE.length)];
+                const ragdoll = new ArticulatedRagdoll({ isPlayer: false, type, shirtColor, hairColor });
+
+                const dir = Math.random() < 0.58 ? 1 : -1; // 1: 플레이어 쪽(+Z)으로 걸어옴, -1: 같은 방향(-Z)
+                ragdoll.root.position.set(x, 0, z);
+                ragdoll.root.rotation.y = dir === 1 ? Math.PI : 0;
+                game.worldGroup.add(ragdoll.root);
+
+                let baseSpeed = 2.4 + Math.random() * 1.1;
+                if (type === 'zombie') baseSpeed = 0.8 + Math.random() * 0.6;
+                if (type === 'rusher') baseSpeed = 5.6 + Math.random() * 1.4;
+                if (type === 'carrier') baseSpeed = 2.0 + Math.random() * 0.8;
+
+                game.npcs.push({
+                    ragdoll,
+                    type,
+                    x,
+                    z,
+                    vx: 0,
+                    vz: dir * baseSpeed,
+                    dir,
+                    baseSpeed,
+                    radius: type === 'carrier' ? 0.68 : 0.46,
+                    stepPhase: Math.random() * 6,
+                    isRagdoll: false,
+                    ragdollTimer: 0,
+                    ragdollRot: { x: Math.PI / 2, y: 0, z: 0 },
+                    ragdollSpin: { x: 0, y: 0, z: 0 }
+                });
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 7. 플레이어 액션, 부상 부여 시스템, 3D 투영 팝업
+         * ============================================================================
+         */
+        function triggerPlayerDive() {
+            const p = game.player;
+            if (!p || p.isRagdoll || p.isDiving) return;
+            if (p.stamina < 20) {
+                spawn3DPopup(p.x, 2.2, p.z, '기력 부족!', '#94a3b8');
+                return;
+            }
+
+            p.stamina = Math.max(0, p.stamina - 24);
+            p.isDiving = true;
+            p.diveTimer = 0.42;
+
+            // 입력 방향 또는 전방(-Z)으로 인간 어뢰처럼 몸을 날림!
+            let dx = 0, dz = 0;
+            if (keys.left) dx -= 1;
+            if (keys.right) dx += 1;
+            if (keys.up) dz -= 1;
+            if (keys.down) dz += 1;
+            if (joystick.active) {
+                dx = joystick.dx;
+                dz = joystick.dy;
+            }
+
+            if (dx === 0 && dz === 0) {
+                dz = -1;
+            } else {
+                const len = Math.hypot(dx, dz);
+                dx /= len;
+                dz /= len;
+            }
+
+            p.vx = dx * 15.5;
+            p.vz = dz * 15.5;
+            p.yaw = Math.atan2(-dx, -dz);
+
+            // 다이빙 자세는 수평으로 날아가는 래그돌 포즈
+            p.ragdollRot = { x: -Math.PI / 2.1, y: p.yaw, z: 0 };
+
+            sfx.playDive();
+            spawn3DPopup(p.x, 2.3, p.z, '슈퍼 다이빙!! 🦸', '#38bdf8');
+        }
+
+        function triggerManualRagdoll() {
+            const p = game.player;
+            if (!p || p.isRagdoll) return;
+            enterPlayerRagdoll(p.vx * 1.1, p.vz * 1.1 - 3, 1.1, '에라 모르겠다! 🫠');
+        }
+
+        function enterPlayerRagdoll(impVx, impVz, duration = 1.25, customShout = null) {
+            const p = game.player;
+            p.isRagdoll = true;
+            p.isDiving = false;
+            p.ragdollTimer = duration;
+            p.vx = impVx;
+            p.vz = impVz;
+            p.ragdollRot = {
+                x: (Math.random() > 0.5 ? 1 : -1) * (Math.PI / 2),
+                y: Math.random() * Math.PI * 2,
+                z: (Math.random() - 0.5) * 1.2
+            };
+            p.ragdollSpin = {
+                x: (Math.random() - 0.5) * 9,
+                y: (Math.random() - 0.5) * 11,
+                z: (Math.random() - 0.5) * 9
+            };
+
+            triggerCameraShake(0.35, 0.25);
+            if (customShout) {
+                spawn3DPopup(p.x, 2.0, p.z, customShout, '#c084fc');
+            }
+        }
+
+        function applyInjury(injuryKey) {
+            const p = game.player;
+            const info = INJURY_TYPES[injuryKey];
+            if (!info) return;
+
+            sfx.playSprainCrack();
+            p.totalBill += info.cost;
+            p.medicalLog.push({
+                label: info.label,
+                desc: info.desc,
+                cost: info.cost,
+                time: (game.stage.timeLimit - game.timeLeft).toFixed(1)
+            });
+
+            if (!p.injuries.has(injuryKey)) {
+                p.injuries.add(injuryKey);
+            }
+
+            // 커피 사망 시 3D 커피컵이 날아감
+            if (injuryKey === 'coffee' && p.ragdoll.coffeeGroup && p.ragdoll.coffeeGroup.visible) {
+                p.ragdoll.coffeeGroup.visible = false;
+                launchFlyingProp(p.x, 1.3, p.z, 0x3e1f0d, '아메리카노 파손!');
+            }
+
+            spawn3DPopup(p.x, 2.4, p.z, `${info.shortLabel}! +₩${info.cost.toLocaleString()}`, '#fda4af');
+            updateInjuryHUD();
+        }
+
+        function healRandomInjury() {
+            const p = game.player;
+            sfx.playHeal();
+            p.stamina = Math.min(p.maxStamina, p.stamina + 45);
+
+            const activeArr = Array.from(p.injuries);
+            if (activeArr.length > 0) {
+                const curedKey = activeArr[0];
+                p.injuries.delete(curedKey);
+                if (curedKey === 'coffee' && p.ragdoll.coffeeGroup) {
+                    p.ragdoll.coffeeGroup.visible = true;
+                }
+                spawn3DPopup(p.x, 2.3, p.z, `응급 처치: ${INJURY_TYPES[curedKey].shortLabel} 회복`, '#6ee7b7');
+            } else {
+                spawn3DPopup(p.x, 2.3, p.z, '기력 완충 +100%', '#6ee7b7');
+            }
+            updateInjuryHUD();
+        }
+
+        function launchFlyingProp(x, y, z, color, label) {
+            const mesh = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.1, 0.08, 0.25, 8),
+                new THREE.MeshStandardMaterial({ color })
+            );
+            mesh.position.set(x, y, z);
+            game.worldGroup.add(mesh);
+            game.flyingProps.push({
+                mesh,
+                vx: (Math.random() - 0.5) * 9,
+                vy: 5.5 + Math.random() * 3,
+                vz: (Math.random() - 0.5) * 9,
+                life: 1.5
+            });
+            if (label) spawn3DPopup(x, y + 0.6, z, label, '#fde047');
+        }
+
+        function spawn3DPopup(x, y, z, text, color = '#ffffff') {
+            const el = document.createElement('div');
+            el.className = 'floating-popup text-xs sm:text-sm';
+            el.style.color = color;
+            el.textContent = text;
+            document.getElementById('popup-layer').appendChild(el);
+
+            game.popups.push({
+                el,
+                pos: new THREE.Vector3(x, y, z),
+                life: 1.15,
+                maxLife: 1.15
+            });
+        }
+
+        function updateInjuryHUD() {
+            const p = game.player;
+            const box = document.getElementById('hud-injuries');
+            document.getElementById('hud-bill').textContent = `₩${p.totalBill.toLocaleString()}`;
+
+            // SVG 인체 실루엣 관절 펄스 동기화
+            ['ankle', 'knee', 'back', 'shoulder'].forEach(part => {
+                const el = document.getElementById(`svg-joint-${part}`);
+                if (el) {
+                    if (p.injuries.has(part)) el.classList.remove('hidden');
+                    else el.classList.add('hidden');
+                }
+            });
+
+            // 커피 보유 상태 동기화
+            const coffeeEl = document.getElementById('hud-coffee-status');
+            if (p.injuries.has('coffee')) {
+                coffeeEl.innerHTML = `<span class="line-through text-white/35">☕</span> <span class="text-[10px] text-rose-400">LOST</span>`;
+            } else {
+                coffeeEl.innerHTML = `☕ <span class="text-[10px] text-amber-300">OK</span>`;
+            }
+
+            // 신체 부상 콜아웃 리스트 (커피 제외한 관절 부상 위주 표시)
+            const bodyInjuries = Array.from(p.injuries).filter(k => k !== 'coffee');
+            if (bodyInjuries.length === 0) {
+                box.innerHTML = `<span class="text-[11px] font-medium text-emerald-400">정상 컨디션</span>`;
+                return;
+            }
+
+            box.innerHTML = '';
+            bodyInjuries.forEach(key => {
+                const info = INJURY_TYPES[key];
+                const [dotBg, textColor] = info.dotColor.split(' ');
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-1.5 text-[11px] font-semibold leading-tight';
+                row.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${dotBg} shrink-0"></span><span class="${textColor}">${info.shortLabel}</span>`;
+                box.appendChild(row);
+            });
+        }
+
+        function triggerCameraShake(intensity, duration) {
+            game.shakeIntensity = Math.max(game.shakeIntensity, intensity);
+            game.shakeTime = Math.max(game.shakeTime, duration);
+        }
+
+        /**
+         * ============================================================================
+         * 8. 메인 물리 & 게임 루프 업데이트
+         * ============================================================================
+         */
+        function updateGame(rawDt) {
+            if (game.state !== 'PLAYING') return;
+
+            const p = game.player;
+            const stage = game.stage;
+
+            // 마지막 순간 열차 출입문 앞에서 다이빙 시 슬로우 모션 발동!
+            const distToTrain = Math.abs(p.z - game.train.z);
+            const isClutchZone = distToTrain < 7.5 && game.timeLeft <= stage.doorCloseStart && (p.isDiving || p.isRagdoll);
+            game.timeScale = isClutchZone ? 0.38 : 1.0;
+
+            const slowOverlay = document.getElementById('slowmo-overlay');
+            if (isClutchZone) slowOverlay.classList.remove('hidden');
+            else slowOverlay.classList.add('hidden');
+
+            const dt = rawDt * game.timeScale;
+
+            // 타이머 & 출입문 닫힘 진행
+            game.timeLeft = Math.max(0, game.timeLeft - dt);
+            if (game.timeLeft <= stage.doorCloseStart) {
+                game.train.doorOpenRatio = Math.max(0, game.timeLeft / stage.doorCloseStart);
+                const ceilSec = Math.ceil(game.timeLeft);
+                if (ceilSec < game.lastBeepSec && ceilSec > 0) {
+                    game.lastBeepSec = ceilSec;
+                    sfx.playDoorBeep();
+                }
+            } else {
+                game.train.doorOpenRatio = 1.0;
+            }
+
+            // 3D 출입문 슬라이딩 위치 업데이트
+            const dw = game.train.doorWidth;
+            const closedOffset = (dw / 4) + (dw / 4) * (1 - game.train.doorOpenRatio);
+            game.train.doorMeshes.forEach(d => {
+                d.leftDoor.position.x = d.cx - (dw / 2) + (dw / 4) * (1 - game.train.doorOpenRatio);
+                d.rightDoor.position.x = d.cx + (dw / 2) - (dw / 4) * (1 - game.train.doorOpenRatio);
+            });
+
+            if (game.timeLeft <= 0) {
+                finishStage(false, '출입문이 완전히 닫혀 눈앞에서 열차를 놓쳤습니다!');
+                return;
+            }
+
+            // 에스컬레이터 발판 애니메이션
+            for (const esc of game.escalators) {
+                for (const st of esc.steps) {
+                    st.localZ += esc.dir * 3.8 * dt;
+                    const halfL = esc.length / 2 - 0.3;
+                    if (st.localZ < -halfL) st.localZ += esc.length - 0.6;
+                    if (st.localZ > halfL) st.localZ -= esc.length - 0.6;
+                    st.mesh.position.z = esc.z + st.localZ;
+                }
+            }
+
+            // 플레이어 업데이트
+            updatePlayer(dt);
+
+            // 군중 NPC 업데이트
+            updateNPCs(dt);
+
+            // 픽업 & 날아가는 소품 업데이트
+            updatePickupsAndProps(dt);
+
+            // 승강장 열차 탑승 체크
+            if (p.z <= game.train.z + 1.05) {
+                checkTrainBoarding();
+            }
+
+            // 3인칭 추적 카메라 업데이트
+            updateCamera(rawDt);
+
+            // HUD & 3D 팝업 좌표 동기화
+            updateHUD();
+            updatePopups(rawDt);
+        }
+
+        function updatePlayer(dt) {
+            const p = game.player;
+            const stage = game.stage;
+            const halfW = stage.corridorWidth / 2 - p.radius - 0.2;
+
+            if (p.invulnTimer > 0) p.invulnTimer -= dt;
+
+            let accelX = 0, accelZ = 0;
+
+            if (p.isRagdoll) {
+                // [래그돌 상태]: 바닥을 구르며 감속 후 기상
+                p.ragdollTimer -= dt;
+                p.vx *= Math.pow(0.18, dt);
+                p.vz *= Math.pow(0.18, dt);
+
+                p.ragdollRot.x += p.ragdollSpin.x * dt;
+                p.ragdollRot.y += p.ragdollSpin.y * dt;
+                p.ragdollRot.z += p.ragdollSpin.z * dt;
+                p.ragdollSpin.x *= Math.pow(0.2, dt);
+                p.ragdollSpin.y *= Math.pow(0.2, dt);
+                p.ragdollSpin.z *= Math.pow(0.2, dt);
+
+                if (p.ragdollTimer <= 0) {
+                    p.isRagdoll = false;
+                    p.invulnTimer = 0.7;
+                    spawn3DPopup(p.x, 1.9, p.z, '으윽... 일어났다!', '#e2e8f0');
+                }
+            } else if (p.isDiving) {
+                // [다이빙 몸날리기 상태]: 공중을 날아가다 착지 후 래그돌 전환
+                p.diveTimer -= dt;
+                p.ragdollRot.y = p.yaw;
+                if (p.diveTimer <= 0) {
+                    p.isDiving = false;
+                    enterPlayerRagdoll(p.vx * 0.55, p.vz * 0.55, 0.75, '철퍼덕!!');
+                }
+            } else {
+                // [일반 이동 / 질주 상태]
+                let moveX = 0, moveZ = 0;
+                if (keys.left) moveX -= 1;
+                if (keys.right) moveX += 1;
+                if (keys.up) moveZ -= 1;
+                if (keys.down) moveZ += 1;
+                if (joystick.active) {
+                    moveX = joystick.dx;
+                    moveZ = joystick.dy;
+                }
+
+                const inputLen = Math.hypot(moveX, moveZ);
+                if (inputLen > 1) {
+                    moveX /= inputLen;
+                    moveZ /= inputLen;
+                }
+
+                const isSprinting = keys.shift && inputLen > 0.1 && p.stamina > 2;
+                const regenMult = p.injuries.has('coffee') ? 0.55 : 1.0;
+
+                if (isSprinting) {
+                    p.stamina = Math.max(0, p.stamina - 26 * dt);
+                } else {
+                    p.stamina = Math.min(p.maxStamina, p.stamina + 18 * regenMult * dt);
+                }
+
+                // 무릎 꺾임 부상 시 질주 중 랜덤하게 다리가 풀리며 주저앉음!
+                if (isSprinting && p.injuries.has('knee')) {
+                    p.kneeStumbleTimer -= dt;
+                    if (p.kneeStumbleTimer <= 0) {
+                        p.kneeStumbleTimer = 2.6 + Math.random() * 2.0;
+                        sfx.playSprainCrack();
+                        enterPlayerRagdoll(p.vx * 0.6, p.vz * 0.6, 0.9, '악! 무릎이 꺾였다!! 🦵');
+                        return;
+                    }
+                }
+
+                // 에스컬레이터 가속/감속 체크
+                let escVz = 0;
+                for (const esc of game.escalators) {
+                    if (Math.abs(p.x - esc.x) < esc.w / 2 && Math.abs(p.z - esc.z) < esc.length / 2) {
+                        escVz = esc.dir * 3.8;
+                        break;
+                    }
+                }
+
+                // 젖은 바닥 미끄러짐 체크
+                let onWet = false;
+                for (const wet of game.wetZones) {
+                    if (Math.hypot(p.x - wet.x, p.z - wet.z) < wet.r) {
+                        onWet = true;
+                        // 젖은 바닥에서 전력 질주 시 일정 확률로 미끄러져 래그돌!
+                        if (isSprinting && p.invulnTimer <= 0 && Math.random() < 1.8 * dt) {
+                            sfx.playBonk(false);
+                            applyInjury('ankle');
+                            enterPlayerRagdoll(p.vx * 1.15, p.vz * 1.15, 1.15, '미끄덩!! 발목 삐끗! 💦');
+                            return;
+                        }
+                        break;
+                    }
+                }
+
+                const anklePenalty = p.injuries.has('ankle') ? 0.72 : 1.0;
+                const baseSpd = (isSprinting ? 9.6 : 6.4) * anklePenalty;
+
+                const targetVx = moveX * baseSpd;
+                const targetVz = moveZ * baseSpd + escVz;
+                const accelRate = onWet ? 2.8 : 13.0;
+
+                const prevVx = p.vx;
+                const prevVz = p.vz;
+                p.vx += (targetVx - p.vx) * Math.min(1, accelRate * dt);
+                p.vz += (targetVz - p.vz) * Math.min(1, accelRate * dt);
+
+                accelX = (p.vx - prevVx) / Math.max(0.001, dt);
+                accelZ = (p.vz - prevVz) / Math.max(0.001, dt);
+
+                const horizSpeed = Math.hypot(p.vx, p.vz);
+                if (inputLen > 0.1) {
+                    const targetYaw = Math.atan2(-moveX, -moveZ);
+                    // 부드러운 회전 보간
+                    let diff = targetYaw - p.yaw;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    p.yaw += diff * Math.min(1, 12 * dt);
+
+                    p.stepPhase += dt * (isSprinting ? 17 : 12) * anklePenalty;
+                    sfx.playStep(isSprinting, p.injuries.has('ankle'));
+                }
+            }
+
+            p.x += p.vx * dt;
+            p.z += p.vz * dt;
+
+            // 좌우 벽 경계 제한
+            if (p.x < -halfW) { p.x = -halfW; p.vx *= -0.4; }
+            if (p.x > halfW)  { p.x = halfW;  p.vx *= -0.4; }
+            if (p.z > -1.0)   { p.z = -1.0;   p.vz = 0; }
+
+            // 기둥 충돌
+            for (const pil of game.pillars) {
+                const dx = p.x - pil.x;
+                const dz = p.z - pil.z;
+                const dist = Math.hypot(dx, dz);
+                const minDist = p.radius + pil.r;
+                if (dist < minDist && dist > 0) {
+                    const nx = dx / dist;
+                    const nz = dz / dist;
+                    p.x = pil.x + nx * minDist;
+                    p.z = pil.z + nz * minDist;
+                    const impact = Math.hypot(p.vx, p.vz);
+                    p.vx = nx * impact * 0.5;
+                    p.vz = nz * impact * 0.5;
+                    if (impact > 7.5 && !p.isRagdoll) {
+                        sfx.playBonk(true);
+                        applyInjury('shoulder');
+                        enterPlayerRagdoll(p.vx, p.vz, 1.1, '쾅!! 기둥에 박았다!');
+                    }
+                }
+            }
+
+            // 3D 메시 위치 및 관절 애니메이션 동기화
+            p.ragdoll.root.position.set(p.x, 0, p.z);
+            p.ragdoll.root.rotation.y = (p.isRagdoll || p.isDiving) ? 0 : p.yaw;
+
+            p.ragdoll.updatePose(dt, {
+                speed: Math.hypot(p.vx, p.vz),
+                isSprinting: keys.shift,
+                isRagdoll: p.isRagdoll || p.isDiving,
+                ragdollRot: p.ragdollRot,
+                injuries: p.injuries,
+                stepPhase: p.stepPhase,
+                accelX,
+                accelZ
+            });
+        }
+
+        function updateNPCs(dt) {
+            const p = game.player;
+            const stage = game.stage;
+            const halfW = stage.corridorWidth / 2 - 0.8;
+
+            for (let i = 0; i < game.npcs.length; i++) {
+                const npc = game.npcs[i];
+
+                if (npc.isRagdoll) {
+                    npc.ragdollTimer -= dt;
+                    npc.vx *= Math.pow(0.15, dt);
+                    npc.vz *= Math.pow(0.15, dt);
+                    npc.ragdollRot.x += npc.ragdollSpin.x * dt;
+                    npc.ragdollRot.y += npc.ragdollSpin.y * dt;
+                    if (npc.ragdollTimer <= 0) {
+                        npc.isRagdoll = false;
+                        npc.vz = npc.dir * npc.baseSpeed;
+                    }
+                } else {
+                    npc.vz = npc.dir * npc.baseSpeed;
+                    npc.vx = npc.type === 'zombie' ? Math.sin(performance.now() * 0.002 + i) * 0.8 : npc.vx * 0.9;
+                    npc.stepPhase += dt * Math.hypot(npc.vx, npc.vz) * 2.1;
+                }
+
+                npc.x += npc.vx * dt;
+                npc.z += npc.vz * dt;
+
+                if (npc.x < -halfW) { npc.x = -halfW; npc.vx = Math.abs(npc.vx); }
+                if (npc.x > halfW)  { npc.x = halfW;  npc.vx = -Math.abs(npc.vx); }
+
+                if (npc.z > -4) npc.z = -stage.corridorLength + 6;
+                if (npc.z < -stage.corridorLength + 5) npc.z = -5;
+
+                // 기둥 회피
+                for (const pil of game.pillars) {
+                    const dx = npc.x - pil.x;
+                    const dz = npc.z - pil.z;
+                    const dist = Math.hypot(dx, dz);
+                    if (dist < npc.radius + pil.r && dist > 0) {
+                        npc.x = pil.x + (dx / dist) * (npc.radius + pil.r);
+                        npc.z = pil.z + (dz / dist) * (npc.radius + pil.r);
+                    }
+                }
+
+                // 플레이어 <-> NPC 3D 물리 충돌
+                const dx = p.x - npc.x;
+                const dz = p.z - npc.z;
+                const dist = Math.hypot(dx, dz);
+                const minDist = p.radius + npc.radius;
+
+                if (dist < minDist && dist > 0) {
+                    const nx = dx / dist;
+                    const nz = dz / dist;
+                    const overlap = minDist - dist;
+
+                    p.x += nx * overlap * 0.5;
+                    p.z += nz * overlap * 0.5;
+                    npc.x -= nx * overlap * 0.5;
+                    npc.z -= nz * overlap * 0.5;
+
+                    if (p.isDiving) {
+                        // [플레이어 인간 어뢰 다이빙 돌파!] NPC가 공중제비 래그돌로 날아감!
+                        npc.isRagdoll = true;
+                        npc.ragdollTimer = 1.6;
+                        npc.vx = -nx * 13;
+                        npc.vz = -nz * 13;
+                        npc.ragdollRot = { x: Math.PI / 2, y: Math.random() * 6, z: 0 };
+                        npc.ragdollSpin = { x: 8, y: 10, z: 6 };
+
+                        sfx.playBonk(true);
+                        triggerCameraShake(0.28, 0.18);
+                        spawn3DPopup(npc.x, 2.0, npc.z, '으아악!! 볼링핀이다!!', '#fde047');
+                    } else if (!p.isRagdoll && p.invulnTimer <= 0) {
+                        // [일반 충돌 -> 상대 속도가 빠르거나 캐리어/전력질주 회사원이면 플레이어가 넘어짐!]
+                        const relSpeed = Math.hypot(p.vx - npc.vx, p.vz - npc.vz);
+                        const isHeavyHit = relSpeed > 6.8 || npc.type === 'carrier' || npc.type === 'rusher';
+
+                        sfx.playBonk(isHeavyHit);
+
+                        // NPC도 살짝 밀려남
+                        npc.vx = -nx * 4.5;
+                        npc.vz = -nz * 4.5;
+
+                        if (isHeavyHit) {
+                            // 부위별 랜덤 부상 판정!
+                            let injuryPool = ['ankle', 'back', 'shoulder', 'knee'];
+                            if (npc.type === 'carrier') injuryPool = ['ankle', 'knee']; // 캐리어 바퀴에 발목/무릎 꺾임!
+                            if (!p.injuries.has('coffee') && Math.random() < 0.45) {
+                                injuryPool.push('coffee');
+                            }
+                            const chosen = injuryPool[Math.floor(Math.random() * injuryPool.length)];
+                            applyInjury(chosen);
+
+                            enterPlayerRagdoll(nx * 8.5, nz * 8.5, 1.25);
+                        } else {
+                            p.vx = nx * 6.0;
+                            p.vz = nz * 6.0;
+                            p.invulnTimer = 0.5;
+                            spawn3DPopup(npc.x, 1.9, npc.z, '어이쿠, 조심해요!', '#ffffff');
+                        }
+                    }
+                }
+
+                // NPC 3D 메시 동기화
+                npc.ragdoll.root.position.set(npc.x, 0, npc.z);
+                npc.ragdoll.root.rotation.y = npc.isRagdoll ? 0 : (npc.dir === 1 ? Math.PI : 0);
+                npc.ragdoll.updatePose(dt, {
+                    speed: Math.hypot(npc.vx, npc.vz),
+                    isSprinting: npc.type === 'rusher',
+                    isRagdoll: npc.isRagdoll,
+                    ragdollRot: npc.ragdollRot,
+                    injuries: null,
+                    stepPhase: npc.stepPhase,
+                    accelX: 0,
+                    accelZ: 0
+                });
+            }
+        }
+
+        function updatePickupsAndProps(dt) {
+            const p = game.player;
+
+            // 파스/에너지 드링크 픽업 회전 및 획득
+            for (const pk of game.pickups) {
+                if (!pk.active) continue;
+                pk.mesh.rotation.y += 2.5 * dt;
+                pk.mesh.position.y = 0.85 + Math.sin(performance.now() * 0.005) * 0.12;
+
+                if (Math.hypot(p.x - pk.x, p.z - pk.z) < 1.15) {
+                    pk.active = false;
+                    pk.mesh.visible = false;
+                    healRandomInjury();
+                }
+            }
+
+            // 날아가는 커피컵 물리
+            for (let i = game.flyingProps.length - 1; i >= 0; i--) {
+                const fp = game.flyingProps[i];
+                fp.life -= dt;
+                fp.vy -= 18 * dt;
+                fp.mesh.position.x += fp.vx * dt;
+                fp.mesh.position.y = Math.max(0.1, fp.mesh.position.y + fp.vy * dt);
+                fp.mesh.position.z += fp.vz * dt;
+                fp.mesh.rotation.x += 12 * dt;
+                fp.mesh.rotation.z += 10 * dt;
+
+                if (fp.life <= 0) {
+                    game.worldGroup.remove(fp.mesh);
+                    game.flyingProps.splice(i, 1);
+                }
+            }
+        }
+
+        function checkTrainBoarding() {
+            const p = game.player;
+            const openRatio = game.train.doorOpenRatio;
+
+            if (openRatio <= 0.06) {
+                p.z = game.train.z + 1.1;
+                p.vz = 5;
+                sfx.playBonk(true);
+                spawn3DPopup(p.x, 2.0, p.z, '출입문이 닫혔습니다!', '#fb7185');
+                return;
+            }
+
+            // 3개 출입문 중 열린 공간으로 들어갔는지 판정
+            let boarded = false;
+            for (const cx of game.train.doorCentersX) {
+                const halfGap = (game.train.doorWidth * openRatio) / 2 + 0.25;
+                if (Math.abs(p.x - cx) <= halfGap) {
+                    boarded = true;
+                    break;
+                }
+            }
+
+            if (boarded) {
+                const isClutch = openRatio < 0.48 || game.timeLeft < 2.8;
+                finishStage(
+                    true,
+                    isClutch
+                        ? '🔥 CLUTCH! 닫히는 열차 문틈으로 몸을 던져 기적적으로 탑승했습니다!'
+                        : '지옥철 인파를 뚫고 무사히 환승 열차에 탑승했습니다!'
+                );
+            } else {
+                p.z = game.train.z + 1.1;
+                p.vz = 4;
+                sfx.playBonk(false);
+                spawn3DPopup(p.x, 2.0, p.z, '열린 출입문으로 들어가세요!', '#fbbf24');
+            }
+        }
+
+        function updateCamera(dt) {
+            const p = game.player;
+            // 속도/다이빙에 따른 역동적인 FOV 변화
+            const speed = Math.hypot(p.vx, p.vz);
+            const targetFov = p.isDiving ? 70 : (keys.shift && speed > 5 ? 64 : 58);
+            camera.fov += (targetFov - camera.fov) * Math.min(1, 8 * dt);
+            camera.updateProjectionMatrix();
+
+            let shakeX = 0, shakeY = 0;
+            if (game.shakeTime > 0) {
+                game.shakeTime -= dt;
+                shakeX = (Math.random() - 0.5) * game.shakeIntensity;
+                shakeY = (Math.random() - 0.5) * game.shakeIntensity;
+            }
+
+            const targetCamX = p.x * 0.55 + shakeX;
+            const targetCamY = 4.6 + shakeY;
+            const targetCamZ = p.z + 6.4;
+
+            camera.position.x += (targetCamX - camera.position.x) * Math.min(1, 10 * dt);
+            camera.position.y += (targetCamY - camera.position.y) * Math.min(1, 10 * dt);
+            camera.position.z += (targetCamZ - camera.position.z) * Math.min(1, 10 * dt);
+
+            camera.lookAt(p.x * 0.4, 1.15, p.z - 5.5);
+
+            // 그림자 카메라도 플레이어를 따라 이동시켜 선명한 그림자 유지
+            dirLight.position.set(p.x + 12, 32, p.z + 14);
+            dirLight.target.position.set(p.x, 0, p.z - 6);
+        }
+
+        function updatePopups(dt) {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+
+            for (let i = game.popups.length - 1; i >= 0; i--) {
+                const pop = game.popups[i];
+                pop.life -= dt;
+                pop.pos.y += 1.1 * dt;
+
+                if (pop.life <= 0) {
+                    pop.el.remove();
+                    game.popups.splice(i, 1);
+                    continue;
+                }
+
+                const projected = pop.pos.clone().project(camera);
+                if (projected.z > 1) {
+                    pop.el.style.display = 'none';
+                } else {
+                    pop.el.style.display = 'block';
+                    const sx = (projected.x * 0.5 + 0.5) * w;
+                    const sy = (-projected.y * 0.5 + 0.5) * h;
+                    pop.el.style.left = `${sx}px`;
+                    pop.el.style.top = `${sy}px`;
+                    pop.el.style.opacity = Math.min(1, (pop.life / pop.maxLife) * 1.6);
+                }
+            }
+        }
+
+        function updateHUD() {
+            const stage = game.stage;
+            const p = game.player;
+
+            const timerEl = document.getElementById('hud-timer');
+            const doorStatus = document.getElementById('hud-door-status');
+
+            timerEl.textContent = game.timeLeft.toFixed(1);
+            if (game.timeLeft < 10.0) {
+                doorStatus.textContent = game.timeLeft <= stage.doorCloseStart ? 'CLOSING' : 'HURRY';
+                doorStatus.className = 'text-[10px] font-bold tracking-wider text-rose-400 uppercase animate-urgent-text';
+                timerEl.className = 'font-display text-lg sm:text-xl font-bold tabular-nums text-rose-400 leading-none animate-urgent-text';
+            } else {
+                doorStatus.textContent = 'OPEN';
+                doorStatus.className = 'text-[10px] font-semibold tracking-wider text-emerald-400 uppercase';
+                timerEl.className = 'font-display text-lg sm:text-xl font-bold tabular-nums text-white leading-none';
+            }
+
+            const staminaPct = `${(p.stamina / p.maxStamina) * 100}%`;
+            document.getElementById('hud-stamina-bar').style.width = staminaPct;
+            const mobileStamina = document.getElementById('hud-stamina-bar-mobile');
+            if (mobileStamina) mobileStamina.style.width = staminaPct;
+
+            const startZ = -2;
+            const goalZ = game.train.z + 1.05;
+            const pct = Math.max(0, Math.min(100, ((startZ - p.z) / (startZ - goalZ)) * 100));
+            document.getElementById('hud-progress-bar').style.width = `${pct}%`;
+            document.getElementById('hud-progress-dot').style.left = `${pct}%`;
+        }
+
+        /**
+         * ============================================================================
+         * 9. 화면 전환 & 정형외과 진단서 결과 출력
+         * ============================================================================
+         */
+        function startStage(stageIdx) {
+            sfx.init();
+            buildStageWorld(stageIdx);
+
+            const stage = game.stage;
+            document.getElementById('hud-station-name').textContent = stage.name;
+            document.getElementById('hud-route-desc').textContent = stage.routeDesc;
+
+            const fromBadge = document.getElementById('hud-line-from');
+            fromBadge.textContent = stage.fromBadge.text;
+            fromBadge.style.backgroundColor = stage.fromBadge.bg;
+            fromBadge.style.color = stage.fromBadge.fg;
+
+            const toBadge = document.getElementById('hud-line-to');
+            toBadge.textContent = stage.toBadge.text;
+            toBadge.style.backgroundColor = stage.toBadge.bg;
+            toBadge.style.color = stage.toBadge.fg;
+
+            updateInjuryHUD();
+
+            document.getElementById('screen-menu').classList.add('hidden');
+            document.getElementById('screen-result').classList.add('hidden');
+            document.getElementById('slowmo-overlay').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 768;
+            if (isTouch) {
+                document.getElementById('touch-controls').classList.remove('hidden');
+                document.getElementById('desktop-hud-right').classList.add('hidden');
+            } else {
+                document.getElementById('touch-controls').classList.add('hidden');
+                document.getElementById('desktop-hud-right').classList.remove('hidden');
+            }
+
+            game.state = 'PLAYING';
+        }
+
+        function openMenu() {
+            game.state = 'MENU';
+            selectMenuStage(game.stageIndex);
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('touch-controls').classList.add('hidden');
+            document.getElementById('slowmo-overlay').classList.add('hidden');
+            document.getElementById('screen-result').classList.add('hidden');
+            document.getElementById('screen-menu').classList.remove('hidden');
+        }
+
+        function finishStage(isSuccess, message) {
+            game.state = 'RESULT';
+            document.getElementById('touch-controls').classList.add('hidden');
+            document.getElementById('slowmo-overlay').classList.add('hidden');
+
+            const p = game.player;
+            const tag = document.getElementById('res-tag');
+            const title = document.getElementById('res-title');
+            const desc = document.getElementById('res-desc');
+            const rankEl = document.getElementById('res-rank');
+            const nextBtn = document.getElementById('btn-next-stage');
+
+            document.getElementById('res-station-route').textContent = `${game.stage.name} (${game.stage.routeDesc.replace(' 환승', '')})`;
+            desc.textContent = message;
+            document.getElementById('res-time').textContent = `${game.timeLeft.toFixed(1)}s`;
+            document.getElementById('res-total-bill').textContent = `₩${p.totalBill.toLocaleString()}`;
+
+            // 정형외과 영수증 상병 내역 채우기
+            const listEl = document.getElementById('res-injury-list');
+            if (p.medicalLog.length === 0) {
+                listEl.innerHTML = `<div class="text-emerald-700 font-semibold py-2 text-center bg-emerald-50 rounded-lg border border-emerald-200/70">특이 상병 없음 (무상처 완벽 환승)</div>`;
+            } else {
+                listEl.innerHTML = p.medicalLog.map(item => `
+                    <div class="flex items-center justify-between py-1.5 border-b border-slate-200/80 last:border-b-0">
+                        <div>
+                            <span class="font-bold text-slate-900">${item.label}</span>
+                            <span class="text-[10px] text-slate-500 block">${item.desc}</span>
+                        </div>
+                        <span class="font-display font-bold tabular-nums text-rose-600">₩${item.cost.toLocaleString()}</span>
+                    </div>
+                `).join('');
+            }
+
+            if (isSuccess) {
+                const isClutch = message.includes('CLUTCH');
+                sfx.playWin(isClutch);
+
+                let rank = 'B';
+                if (p.medicalLog.length === 0 && game.timeLeft >= 3.0) rank = 'S';
+                else if (p.medicalLog.length <= 2) rank = 'A';
+                else if (p.medicalLog.length >= 5) rank = 'C';
+
+                tag.textContent = isClutch ? 'CLUTCH BOARDING' : 'BOARDING COMPLETE';
+                tag.className = 'inline-block font-display text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-emerald-700 text-white mb-1.5';
+                title.textContent = `${game.stage.name} 탑승 성공`;
+                title.className = 'text-right font-bold text-emerald-700';
+                rankEl.textContent = rank;
+                rankEl.className = rank === 'S' ? 'font-display text-3xl font-bold leading-none text-amber-400' : 'font-display text-3xl font-bold leading-none text-emerald-400';
+
+                if (game.stageIndex < STAGES.length - 1) {
+                    nextBtn.textContent = `다음 역 환승 (${STAGES[game.stageIndex + 1].name}) ➔`;
+                    nextBtn.dataset.action = 'next';
+                } else {
+                    nextBtn.textContent = '첫 역부터 다시 ↻';
+                    nextBtn.dataset.action = 'first';
+                }
+            } else {
+                sfx.playFail();
+                tag.textContent = 'MISSED TRAIN';
+                tag.className = 'inline-block font-display text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-rose-600 text-white mb-1.5';
+                title.textContent = '탑승 실패 (지각 확정)';
+                title.className = 'text-right font-bold text-rose-600';
+                rankEl.textContent = 'F';
+                rankEl.className = 'font-display text-3xl font-bold leading-none text-rose-400';
+
+                nextBtn.textContent = '다시 뛰기 ↻';
+                nextBtn.dataset.action = 'retry';
+            }
+
+            document.getElementById('screen-result').classList.remove('hidden');
+        }
+
+        function nextOrRetryStage() {
+            const action = document.getElementById('btn-next-stage').dataset.action;
+            if (action === 'next') startStage(game.stageIndex + 1);
+            else if (action === 'first') startStage(0);
+            else startStage(game.stageIndex);
+        }
+
+        /**
+         * ============================================================================
+         * 10. 메인 애니메이션 루프
+         * ============================================================================
+         */
+        let lastFrameTime = performance.now();
+
+        function animate(now) {
+            const rawDt = Math.min(0.05, (now - lastFrameTime) / 1000);
+            lastFrameTime = now;
+
+            if (game.state === 'PLAYING') {
+                updateGame(rawDt);
+            } else if (game.state === 'MENU') {
+                // 메뉴 화면 배경용 3D 카메라 천천히 패닝
+                const t = now * 0.0004;
+                camera.position.set(Math.sin(t) * 3.5, 4.8, -12 + Math.cos(t) * 4);
+                camera.lookAt(0, 1.2, -28);
+            }
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        window.onload = () => {
+            buildStageWorld(1);
+            requestAnimationFrame(animate);
+        };
+    </script>
+</body>
+</html>
